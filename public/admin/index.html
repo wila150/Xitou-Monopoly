@@ -17,6 +17,7 @@
     <button class="tab-btn" data-tab="routes">組別路線</button>
     <button class="tab-btn" data-tab="progress">即時進度</button>
     <button class="tab-btn" data-tab="referees">關主名單</button>
+    <button class="tab-btn" data-tab="leaders">小隊長名單</button>
   </nav>
 
   <main>
@@ -63,6 +64,17 @@
       <table>
         <thead><tr><th>關卡</th><th>LINE 帳號（末 6 碼）</th><th>登記時間</th></tr></thead>
         <tbody id="referees-body"></tbody>
+      </table>
+    </section>
+
+    <!-- 小隊長名單 -->
+    <section class="panel" id="panel-leaders">
+      <div class="toolbar">
+        <button class="btn secondary" id="refresh-leaders">🔄 重新整理</button>
+      </div>
+      <table>
+        <thead><tr><th>組別</th><th>LINE 帳號（末 6 碼）</th><th>狀態</th><th>報到時間</th></tr></thead>
+        <tbody id="leaders-body"></tbody>
       </table>
     </section>
   </main>

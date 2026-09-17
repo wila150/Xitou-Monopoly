@@ -181,6 +181,14 @@ router.get("/api/referees", async (req, res, next) => {
   }
 });
 
+router.get("/api/team-leaders", async (req, res, next) => {
+  try {
+    res.json(await teamService.listTeamLeaders());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // 重置整場遊戲：清空所有隊伍報到／進度／紀錄，跟 LINE 指令「重置遊戲 確認」是同一個底層函式。
 // 這是不可逆操作，前端有另外做二次確認，這裡再多要求 body 帶 confirm: true，避免誤觸的請求直接生效。
 router.post("/api/reset-game", async (req, res, next) => {

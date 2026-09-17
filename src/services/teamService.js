@@ -402,6 +402,23 @@ async function listReferees() {
   }));
 }
 
+// 給後台網頁看目前每組的小隊長是誰（不含 userId 全碼，只顯示末 6 碼方便辨識，保留一點隱私）
+async function listTeamLeaders() {
+  const rows = await db.all(
+    `SELECT t.group_no, t.leader_user_id, t.status, tm.joined_at
+     FROM teams t
+     LEFT JOIN team_members tm ON tm.user_id = t.leader_user_id
+     WHERE t.leader_user_id IS NOT NULL
+     ORDER BY t.group_no`
+  );
+  return rows.map((r) => ({
+    groupNo: r.group_no,
+    userIdSuffix: r.leader_user_id.slice(-6),
+    status: r.status,
+    joinedAt: r.joined_at,
+  }));
+}
+
 // ---- 三之五、總領隊自助登記與群發（不需要是 ADMIN_USER_IDS，也能對所有小隊長廣播）----
 
 async function registerBroadcaster(userId) {
@@ -880,6 +897,7 @@ module.exports = {
   getRefereeCheckpoint,
   resetReferees,
   listReferees,
+  listTeamLeaders,
   registerBroadcaster,
   isBroadcaster,
   resetBroadcasters,

@@ -34,6 +34,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     document.getElementById(`panel-${btn.dataset.tab}`).classList.add("active");
     if (btn.dataset.tab === "progress") loadProgress();
     if (btn.dataset.tab === "referees") loadReferees();
+    if (btn.dataset.tab === "leaders") loadTeamLeaders();
   });
 });
 
@@ -338,6 +339,31 @@ async function loadReferees() {
     .join("");
 }
 document.getElementById("refresh-referees").addEventListener("click", loadReferees);
+
+// ---- 小隊長名單 ----
+const STATUS_LABELS = {
+  NOT_CHECKED_IN: "尚未報到",
+  CHECKED_IN: "已報到／待出發",
+  IN_PROGRESS: "闖關中",
+  FINISHED: "已終點確認",
+};
+
+async function loadTeamLeaders() {
+  const rows = await api("/api/team-leaders");
+  document.getElementById("leaders-body").innerHTML = rows
+    .map(
+      (r) => `
+        <tr>
+          <td>第 ${r.groupNo} 組</td>
+          <td>...${r.userIdSuffix}</td>
+          <td><span class="status-tag status-${r.status}">${STATUS_LABELS[r.status] || r.status}</span></td>
+          <td>${r.joinedAt ? new Date(r.joinedAt).toLocaleString("zh-TW") : "-"}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+document.getElementById("refresh-leaders").addEventListener("click", loadTeamLeaders);
 
 // ---- 初始載入 ----
 loadCheckpoints().catch((err) => showMsg(cpMsg, err.message, true));
