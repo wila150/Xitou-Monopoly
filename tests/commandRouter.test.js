@@ -8,6 +8,7 @@ process.env.DATABASE_URL =
 process.env.PGSSL = "false";
 process.env.PUBLIC_BASE_URL = "https://example.com";
 process.env.ADMIN_USER_IDS = "Uadmin";
+process.env.STAFF_USER_IDS = "Ustaff";
 
 const dbModule = require("../src/db");
 const commandRouter = require("../src/handlers/commandRouter");
@@ -16,6 +17,7 @@ const { getRoute } = require("../src/config/teamsRoute");
 const { checkpoints } = require("../src/config/checkpoints");
 
 const ADMIN = "Uadmin";
+const STAFF = "Ustaff";
 
 test.before(async () => {
   await dbModule.init();
@@ -144,9 +146,9 @@ test("照片／影片審核：上傳後不會自動過關，小編通過才解�
   const teamBefore = await teamService.findTeam(1);
   assert.equal(teamBefore.current_index, 0);
 
-  // 非小編不能通過審核
+  // 非小編、非登記關主不能通過審核
   const deniedApprove = await commandRouter.route("Uleader", "通過 1組");
-  assert.match(textsOf(deniedApprove)[0], /僅限小編使用/);
+  assert.match(textsOf(deniedApprove)[0], /僅限小編或登記過的關主使用/);
 
   const approve = await commandRouter.route(ADMIN, "通過 1組");
   assert.match(textsOf(approve)[0], /已為第 1 組確認/);
@@ -438,4 +440,44 @@ test("逾時判斷是看「出發後經過多久」，不是比對當天固定�
   const lateTeamMsgs = lateArrive.groupBroadcasts[0].messages.map((m) => m.text).join("");
   assert.match(lateTeamMsgs, /逾時/);
   assert.equal((await teamService.findTeam(2)).is_late, 1);
+});
+
+test("關主名單：登記過的關主可以用「通過」，但用不了其他管理指令", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  const approve = await commandRouter.route(STAFF, "通過 1組");
+  assert.match(textsOf(approve)[0], /已為第 1 組確認/);
+  assert.equal((await teamService.findTeam(1)).current_index, 1);
+
+  const deniedProgress = await commandRouter.route(STAFF, "進度");
+  assert.match(textsOf(deniedProgress)[0], /僅限小編使用/);
+
+  const deniedReset = await commandRouter.route(STAFF, "重置遊戲");
+  assert.match(textsOf(deniedReset)[0], /僅限小編使用/);
+});
+
+test("關主直接喊過制（B3/B4/D6/C4）：隊伍打密語或傳照片都沒用，只能靠通過指令", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  // 第1組路線第2關是 B3（現在是 referee 制，不再是密語制）
+  await commandRouter.route(ADMIN, "通過 1組"); // 先過第1關 D5（photo）
+  assert.equal((await teamService.findTeam(1)).current_index, 1);
+
+  const wrongKeyword = await commandRouter.route("Uleader", "B3");
+  assert.match(textsOf(wrongKeyword)[0], /由關主現場確認完成/);
+
+  const wrongMedia = await teamService.submitMedia("Uleader");
+  assert.match(textsOf({ reply: wrongMedia.reply })[0], /由關主現場確認完成/);
+  assert.equal(wrongMedia.adminNotify.length, 0);
+
+  // 進度應該還在原地，沒有因為上面兩次錯誤嘗試而前進
+  assert.equal((await teamService.findTeam(1)).current_index, 1);
+
+  const approve = await commandRouter.route(STAFF, "通過 1組");
+  assert.match(textsOf(approve)[0], /已為第 1 組確認「救救菜英文」通過/);
+  assert.equal((await teamService.findTeam(1)).current_index, 2);
 });

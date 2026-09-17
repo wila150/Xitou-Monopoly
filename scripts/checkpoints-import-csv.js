@@ -32,9 +32,9 @@ const updated = rows.map((row, i) => {
   seenIds.add(id);
 
   const verifyType = (row.verifyType || "").trim();
-  if (!["keyword", "photo", "video"].includes(verifyType)) {
+  if (!["keyword", "photo", "video", "referee"].includes(verifyType)) {
     errors.push(
-      `第 ${lineNo} 列：verifyType「${row.verifyType}」不合法，必須是 keyword／photo／video 其中之一`
+      `第 ${lineNo} 列：verifyType「${row.verifyType}」不合法，必須是 keyword／photo／video／referee 其中之一`
     );
   }
 

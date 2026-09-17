@@ -148,7 +148,12 @@ async function depart(groupNo) {
   });
 }
 
-// ---- 三、關卡過關（有關主的 6 關比對關鍵字；無關主的 6 關偵測照片／影片）----
+// ---- 三、關卡過關 ----
+// 三種過關方式：
+//   'keyword' （A3、A5）：隊伍直接輸入關主口頭告知的密語，比對正確立即過關
+//   'photo' / 'video'（無關主的 6 關）：隊伍上傳照片／影片先送審，小編或關主打「通過 X組」才真正過關
+//   'referee' （B3、B4、D6、C4）：隊伍不需要輸入任何東西，關主現場確認完成後，
+//              由關主或小編直接打「通過 X組」過關（沒有「送審中」這個中間狀態）
 
 // 檢查「這個人現在能不能嘗試過關」，回傳 { blocked } 表示要直接回覆／不回覆，
 // 或 { team, route, expected, cp } 表示可以繼續往下判斷關鍵字／媒體
@@ -214,6 +219,11 @@ async function verifyKeyword(userId, text) {
     if (guard.blocked !== undefined) return guard.blocked;
     const { team, route, expected, cp } = guard;
 
+    if (cp.verifyType === "referee") {
+      return [
+        textMsg("這一關由關主現場確認完成，不需要輸入任何文字，請等待關主或小編為您解鎖下一關。"),
+      ];
+    }
     if (cp.verifyType !== "keyword") {
       const kind = cp.verifyType === "video" ? "影片" : "照片";
       return [textMsg(`這一關沒有現場關主，請直接上傳${kind}，不需要輸入文字關鍵字。`)];
@@ -234,6 +244,16 @@ async function submitMedia(userId) {
     if (guard.blocked !== undefined) return { reply: guard.blocked, adminNotify: [] };
     const { team, cp } = guard;
 
+    if (cp.verifyType === "referee") {
+      return {
+        reply: [
+          textMsg(
+            "這一關由關主現場確認完成，不需要上傳照片或影片，請等待關主或小編為您解鎖下一關。"
+          ),
+        ],
+        adminNotify: [],
+      };
+    }
     if (cp.verifyType === "keyword") {
       return {
         reply: [textMsg("這一關需要向關主取得關鍵字才能過關，請直接輸入文字關鍵字。")],

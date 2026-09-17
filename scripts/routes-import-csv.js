@@ -1,8 +1,9 @@
 // 把 data/teams-route.csv 匯入回 src/config/teamsRoute.json，並做完整性檢查：
 //   - 每組必須剛好涵蓋所有關卡代號各一次（不多不少、不重複）
-//   - 有關主（verifyType 'keyword'）的關卡必須填關鍵字，且同一關卡在 10 組裡的關鍵字必須完全一致
+//   - 密語制（verifyType 'keyword'，目前是 A3、A5）的關卡必須填關鍵字，且同一關卡在 10 組裡的關鍵字必須完全一致
 //     （目前設計是每關全部組別共用同一個密語，方便關主現場只需記一個字，而不是 10 組各給不同密語）
-//   - 無關主（verifyType 'photo' / 'video'）的關卡不需要關鍵字，該欄位須留空
+//   - 照片／影片送審制（verifyType 'photo' / 'video'）與關主直接喊過制（verifyType 'referee'，
+//     目前是 B3、B4、D6、C4）的關卡都不需要關鍵字，該欄位須留空
 //   - checkpointId 必須是 checkpoints.json 裡存在的代號
 // 檢查沒過不會覆寫 teamsRoute.json，請照錯誤訊息修正 CSV 後重跑。
 const fs = require("fs");

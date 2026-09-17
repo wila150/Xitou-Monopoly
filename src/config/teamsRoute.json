@@ -8,15 +8,15 @@
       },
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "A3",
@@ -32,7 +32,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "E2",
@@ -61,7 +61,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A5",
@@ -73,7 +73,7 @@
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "C5",
@@ -81,11 +81,11 @@
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "D5",
@@ -110,7 +110,7 @@
     "route": [
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "D5",
@@ -118,11 +118,11 @@
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "E2",
@@ -142,7 +142,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A2",
@@ -167,7 +167,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A5",
@@ -183,7 +183,7 @@
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "E2",
@@ -191,11 +191,11 @@
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "A2",
@@ -216,11 +216,11 @@
     "route": [
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "C5",
@@ -228,7 +228,7 @@
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "A3",
@@ -244,7 +244,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A2",
@@ -273,7 +273,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A5",
@@ -289,11 +289,11 @@
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "D5",
@@ -301,7 +301,7 @@
       },
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "A2",
@@ -322,15 +322,15 @@
     "route": [
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "D5",
@@ -350,7 +350,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A2",
@@ -375,7 +375,7 @@
     "route": [
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A5",
@@ -391,11 +391,11 @@
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "E2",
@@ -403,7 +403,7 @@
       },
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "D5",
@@ -428,15 +428,15 @@
     "route": [
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "A3",
@@ -456,7 +456,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A2",
@@ -505,7 +505,7 @@
       },
       {
         "checkpointId": "C4",
-        "keyword": "C4"
+        "keyword": null
       },
       {
         "checkpointId": "A5",
@@ -517,15 +517,15 @@
       },
       {
         "checkpointId": "D6",
-        "keyword": "D6"
+        "keyword": null
       },
       {
         "checkpointId": "B4",
-        "keyword": "B4"
+        "keyword": null
       },
       {
         "checkpointId": "B3",
-        "keyword": "B3"
+        "keyword": null
       }
     ]
   }

@@ -15,22 +15,22 @@
     "name": "救救菜英文",
     "location": "J 大學池後側花園",
     "content": "由關主提供 5 個英文單字，完成五個該字母為首的英文單字（含拼音）即可過關。",
-    "scoringMethod": "由關主評估完成後告知通關關鍵字，請將關鍵字輸入本對話。",
+    "scoringMethod": "由關主評估完成後，請關主或小編直接輸入「通過 X組」解鎖下一關。",
     "mapFiles": [
       "B3.jpg"
     ],
-    "verifyType": "keyword"
+    "verifyType": "referee"
   },
   {
     "id": "C4",
     "name": "瘋狂驗光師",
     "location": "秋海棠標本園",
     "content": "由關主提供有顏色的圖卡，圖卡上的字與圖卡顏色不同，依照關主指示說出答案。",
-    "scoringMethod": "正確後由關主告知通關關鍵字，請將關鍵字輸入本對話。",
+    "scoringMethod": "正確後，請關主或小編直接輸入「通過 X組」解鎖下一關。",
     "mapFiles": [
       "C4.jpg"
     ],
-    "verifyType": "keyword"
+    "verifyType": "referee"
   },
   {
     "id": "A5",
@@ -59,23 +59,23 @@
     "name": "百步穿揚",
     "location": "星光教室（N 溪頭飯店旁）",
     "content": "全體利用腳上的鞋子，依序丟進指定的區域範圍內。",
-    "scoringMethod": "由關主評估完成後告知通關關鍵字，請將關鍵字輸入本對話。",
+    "scoringMethod": "由關主評估完成後，請關主或小編直接輸入「通過 X組」解鎖下一關。",
     "mapFiles": [
       "B4-1.jpg",
       "B4-2.jpg"
     ],
-    "verifyType": "keyword"
+    "verifyType": "referee"
   },
   {
     "id": "D6",
     "name": "節奏遊戲",
     "location": "漢光樓旁草地",
     "content": "跟著指示影片唸完提示，並由攝影師錄影，唸到第六頁即可過關。背景須有步道入鏡。",
-    "scoringMethod": "由關主確認後告知通關關鍵字，請將關鍵字輸入本對話。",
+    "scoringMethod": "由關主確認後，請關主或小編直接輸入「通過 X組」解鎖下一關。",
     "mapFiles": [
       "D6.jpg"
     ],
-    "verifyType": "keyword"
+    "verifyType": "referee"
   },
   {
     "id": "E3",

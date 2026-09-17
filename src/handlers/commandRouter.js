@@ -1,5 +1,5 @@
 const teamService = require("../services/teamService");
-const { isAdmin } = require("../config/admins");
+const { isAdmin, canApproveCheckpoint } = require("../config/admins");
 
 const CHECKIN_RE = /^報到\s*(\d{1,2})\s*組$/;
 const DEPART_RE = /^出發\s*(\d{1,2})\s*組$/;
@@ -16,6 +16,10 @@ function withReply(reply) {
 
 function adminOnlyDenied() {
   return withReply([teamService.textMsg("此指令僅限小編使用。")]);
+}
+
+function approveOnlyDenied() {
+  return withReply([teamService.textMsg("此指令僅限小編或登記過的關主使用。")]);
 }
 
 // 將 teamService 各函式回傳的訊息，統一整理成
@@ -51,8 +55,8 @@ async function route(userId, rawText) {
   }
 
   if ((m = text.match(APPROVE_RE))) {
-    // 小編確認目前這關已完成，解鎖下一關（不限關卡類型：關主關卡或照片／影片皆可用）
-    if (!isAdmin(userId)) return adminOnlyDenied();
+    // 小編或登記過的關主確認目前這關已完成，解鎖下一關（不限關卡類型：關主關卡或照片／影片皆可用）
+    if (!canApproveCheckpoint(userId)) return approveOnlyDenied();
     const groupNo = Number(m[1]);
     const result = await teamService.approveCheckpoint(groupNo);
     return {
