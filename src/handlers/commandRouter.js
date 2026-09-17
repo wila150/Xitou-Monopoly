@@ -7,6 +7,7 @@ const ARRIVE_RE = /^到站\s*(\d{1,2})\s*組$/;
 const APPROVE_RE = /^通過\s*(\d{1,2})\s*組$/;
 const REVERT_RE = /^退回\s*(\d{1,2})\s*組$/;
 const REGISTER_REFEREE_RE = /^我是\s*([A-Za-z]\d)\s*關主$/;
+const BROADCAST_RE = /^群發\s+([\s\S]+)$/;
 const TRANSFER_REQUEST_RE = /^接任隊長\s*(\d{1,2})\s*組$/;
 const TRANSFER_CONFIRM_RE = /^確認換隊長\s*(\d{1,2})\s*組$/;
 const UNBIND_RE = /^解除綁定\s*(\d{1,2})\s*組$/;
@@ -21,6 +22,12 @@ function adminOnlyDenied() {
 
 function approveOnlyDenied() {
   return withReply([teamService.textMsg("此指令僅限小編或登記過的關主使用。")]);
+}
+
+function broadcastOnlyDenied() {
+  return withReply([
+    teamService.textMsg("此指令僅限小編或登記過的總領隊使用，請先輸入「我是總領隊」進行登記。"),
+  ]);
 }
 
 // 將 teamService 各函式回傳的訊息，統一整理成
@@ -59,6 +66,20 @@ async function route(userId, rawText) {
     // 關主自助登記：「我是 B3 關主」，同一帳號再傳一次會直接覆蓋成新的登記
     const checkpointId = m[1].toUpperCase();
     return withReply(await teamService.registerReferee(userId, checkpointId));
+  }
+
+  if (text === "我是總領隊") {
+    // 總領隊自助登記：不需要是 ADMIN_USER_IDS，登記後可以用「群發 訊息」對所有小隊長廣播
+    return withReply(await teamService.registerBroadcaster(userId));
+  }
+
+  if ((m = text.match(BROADCAST_RE))) {
+    // 小編或登記過的總領隊：對所有小隊長廣播一則文字訊息
+    if (!isAdmin(userId) && !(await teamService.isBroadcaster(userId))) {
+      return broadcastOnlyDenied();
+    }
+    const result = await teamService.broadcastToLeaders(m[1]);
+    return { reply: result.reply, groupBroadcasts: [], directPushes: result.directPushes };
   }
 
   if ((m = text.match(APPROVE_RE))) {
@@ -145,6 +166,11 @@ async function route(userId, rawText) {
   if (text === "重置關主") {
     if (!isAdmin(userId)) return adminOnlyDenied();
     return withReply(await teamService.resetReferees());
+  }
+
+  if (text === "重置總領隊") {
+    if (!isAdmin(userId)) return adminOnlyDenied();
+    return withReply(await teamService.resetBroadcasters());
   }
 
   if (text === "重置遊戲") {

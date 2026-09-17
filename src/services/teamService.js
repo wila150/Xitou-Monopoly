@@ -402,6 +402,57 @@ async function listReferees() {
   }));
 }
 
+// ---- 三之五、總領隊自助登記與群發（不需要是 ADMIN_USER_IDS，也能對所有小隊長廣播）----
+
+async function registerBroadcaster(userId) {
+  const membership = await findMembership(db, userId);
+  if (membership) {
+    return [
+      textMsg(
+        `您已經是第 ${membership.group_no} 組的成員，無法同時登記為總領隊。若這是誤觸的隊伍報到，請聯繫小編協助「解除綁定」後再重新登記。`
+      ),
+    ];
+  }
+
+  await db.run(
+    `INSERT INTO broadcasters (user_id, registered_at) VALUES (?, ?)
+     ON CONFLICT (user_id) DO UPDATE SET registered_at = excluded.registered_at`,
+    [userId, nowIso()]
+  );
+
+  return [
+    textMsg("✅ 已登記為總領隊，之後輸入「群發 訊息內容」即可對所有小隊長發送訊息。"),
+  ];
+}
+
+async function isBroadcaster(userId) {
+  const row = await db.get("SELECT 1 FROM broadcasters WHERE user_id = ?", [userId]);
+  return !!row;
+}
+
+// 小編專用：清空所有總領隊登記（跟「重置關主」同樣的設計，不會因為重置整場遊戲而被順便清掉）
+async function resetBroadcasters() {
+  await db.run("DELETE FROM broadcasters");
+  return [textMsg("♻️ 已清空所有總領隊登記。")];
+}
+
+// 對所有「目前有隊長的組別」廣播一則文字訊息（尚未有人報到、還沒產生隊長的組不會收到）
+async function broadcastToLeaders(text) {
+  const rows = await db.all(
+    "SELECT leader_user_id FROM teams WHERE leader_user_id IS NOT NULL"
+  );
+  const message = textMsg(`📢 總領隊訊息\n${text}`);
+  const directPushes = rows.map((r) => ({ to: r.leader_user_id, messages: [message] }));
+  const reply = [
+    textMsg(
+      rows.length > 0
+        ? `已群發給 ${rows.length} 位小隊長。`
+        : "目前尚無隊伍報到，沒有小隊長可以接收群發。"
+    ),
+  ];
+  return { reply, directPushes };
+}
+
 // ---- 三之四、退回一關（更正「通過」／「到站」誤觸或手滑重複的情況）----
 // 「通過」不是天然冪等的操作（每按一次就前進一關），連按兩次或按錯組別都沒有事前防呆，
 // 這裡提供事後更正的方式：FINISHED 就取消終點確認、否則就退回最近一次過的那一關。
@@ -829,6 +880,10 @@ module.exports = {
   getRefereeCheckpoint,
   resetReferees,
   listReferees,
+  registerBroadcaster,
+  isBroadcaster,
+  resetBroadcasters,
+  broadcastToLeaders,
   revertLastCheckpoint,
   finishAtB6,
   freezeProgress,

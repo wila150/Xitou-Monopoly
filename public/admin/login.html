@@ -16,9 +16,16 @@
   }
   h1 { font-size: 18px; margin: 0 0 20px; color: #2f4a35; text-align: center; }
   input {
-    width: 100%; padding: 10px 12px; margin-bottom: 12px; border: 1px solid #ccc;
+    width: 100%; padding: 10px 12px; border: 1px solid #ccc;
     border-radius: 8px; font-size: 15px;
   }
+  .pw-row { position: relative; margin-bottom: 12px; }
+  .pw-row input { padding-right: 60px; margin-bottom: 0; }
+  .pw-row button {
+    position: absolute; right: 4px; top: 4px; bottom: 4px; width: auto;
+    padding: 0 10px; font-size: 12px; background: #eee; color: #444;
+  }
+  .pw-row button:hover { background: #ddd; }
   button {
     width: 100%; padding: 10px; border: none; border-radius: 8px; background: #3a6b45;
     color: #fff; font-size: 15px; cursor: pointer;
@@ -31,12 +38,22 @@
   <div class="card">
     <h1>🌲 溪頭大富翁後台</h1>
     <div class="err" id="err"></div>
-    <input type="password" id="password" placeholder="請輸入後台密碼" autofocus />
+    <div class="pw-row">
+      <input type="password" id="password" placeholder="請輸入後台密碼" autofocus />
+      <button type="button" id="toggle-pw">顯示</button>
+    </div>
     <button id="submit">登入</button>
   </div>
   <script>
     const err = document.getElementById("err");
     const pwInput = document.getElementById("password");
+    const toggleBtn = document.getElementById("toggle-pw");
+
+    toggleBtn.addEventListener("click", () => {
+      const showing = pwInput.type === "text";
+      pwInput.type = showing ? "password" : "text";
+      toggleBtn.textContent = showing ? "顯示" : "隱藏";
+    });
 
     async function doLogin() {
       err.textContent = "";

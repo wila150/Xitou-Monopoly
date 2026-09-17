@@ -102,6 +102,12 @@ CREATE TABLE IF NOT EXISTS referees (
   registered_at  TEXT NOT NULL
 );
 
+-- 總領隊自己傳「我是總領隊」登記，不需要是 ADMIN_USER_IDS 也能用「群發 訊息」對所有小隊長廣播
+CREATE TABLE IF NOT EXISTS broadcasters (
+  user_id        TEXT PRIMARY KEY,
+  registered_at  TEXT NOT NULL
+);
+
 -- 關卡設定與 10 組路線密語：原本存在 checkpoints.json / teamsRoute.json，
 -- 現在改成存資料庫，讓後台網頁編輯的內容不會被下次部署蓋掉。
 -- 第一次啟動時會自動從 JSON 檔案匯入一份初始值（見 src/config/configStore.js 的 seedIfEmpty）。

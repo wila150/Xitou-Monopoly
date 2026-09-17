@@ -311,6 +311,23 @@ async function loadProgress() {
 }
 document.getElementById("refresh-progress").addEventListener("click", loadProgress);
 
+const progressMsg = document.getElementById("progress-msg");
+document.getElementById("reset-game").addEventListener("click", async () => {
+  if (!confirm("⚠️ 這會清空所有隊伍的報到、進度與紀錄，且無法復原，確定要重置整場遊戲嗎？")) return;
+  const typed = prompt('請輸入「確認重置」以繼續：');
+  if (typed !== "確認重置") {
+    showMsg(progressMsg, "輸入不符，已取消重置。", true);
+    return;
+  }
+  try {
+    await api("/api/reset-game", { method: "POST", body: JSON.stringify({ confirm: true }) });
+    showMsg(progressMsg, "已重置整場遊戲。", false);
+    await loadProgress();
+  } catch (err) {
+    showMsg(progressMsg, err.message, true);
+  }
+});
+
 // ---- 關主名單 ----
 async function loadReferees() {
   const rows = await api("/api/referees");

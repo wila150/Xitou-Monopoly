@@ -181,6 +181,20 @@ router.get("/api/referees", async (req, res, next) => {
   }
 });
 
+// 重置整場遊戲：清空所有隊伍報到／進度／紀錄，跟 LINE 指令「重置遊戲 確認」是同一個底層函式。
+// 這是不可逆操作，前端有另外做二次確認，這裡再多要求 body 帶 confirm: true，避免誤觸的請求直接生效。
+router.post("/api/reset-game", async (req, res, next) => {
+  try {
+    if (!(req.body || {}).confirm) {
+      return res.status(400).json({ error: "需要確認才能重置（confirm: true）" });
+    }
+    await teamService.resetGame();
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // eslint-disable-next-line no-unused-vars
 router.use((err, req, res, next) => {
   res.status(400).json({ error: (err && err.message) || "發生未知錯誤" });
