@@ -9,6 +9,7 @@
 const fs = require("fs");
 const path = require("path");
 const { db } = require("../db");
+const imageStore = require("./imageStore");
 
 let checkpointsById = {};
 let routesByGroup = new Map();
@@ -22,8 +23,8 @@ async function seedIfEmpty() {
     for (let i = 0; i < raw.length; i++) {
       const cp = raw[i];
       await db.run(
-        `INSERT INTO checkpoint_configs (id, name, location, content, scoring_method, verify_type, map_files, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO checkpoint_configs (id, name, location, content, scoring_method, verify_type, site_photos, map_images, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           cp.id,
           cp.name,
@@ -31,7 +32,8 @@ async function seedIfEmpty() {
           cp.content,
           cp.scoringMethod,
           cp.verifyType,
-          JSON.stringify(cp.mapFiles || []),
+          JSON.stringify(cp.sitePhotos || cp.mapFiles || []),
+          JSON.stringify(cp.mapImages || []),
           i,
         ]
       );
@@ -69,7 +71,9 @@ async function reload() {
       content: row.content,
       scoringMethod: row.scoring_method,
       verifyType: row.verify_type,
-      mapFiles: JSON.parse(row.map_files || "[]"),
+      sitePhotos: JSON.parse(row.site_photos || "[]"),
+      mapImages: JSON.parse(row.map_images || "[]"),
+      sortOrder: row.sort_order,
     };
   }
   checkpointsById = newCheckpoints;
@@ -110,13 +114,13 @@ function getAllCheckpoints() {
 
 function getFixedCheckpointIds() {
   return getAllCheckpoints()
-    .filter((cp) => cp.mapFiles.length > 0)
+    .filter((cp) => cp.sitePhotos.length > 0)
     .map((cp) => cp.id);
 }
 
 function getFlexibleCheckpointIds() {
   return getAllCheckpoints()
-    .filter((cp) => cp.mapFiles.length === 0)
+    .filter((cp) => cp.sitePhotos.length === 0)
     .map((cp) => cp.id);
 }
 
@@ -136,15 +140,16 @@ function getAllGroupNos() {
 
 async function upsertCheckpoint(cp) {
   await db.run(
-    `INSERT INTO checkpoint_configs (id, name, location, content, scoring_method, verify_type, map_files, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO checkpoint_configs (id, name, location, content, scoring_method, verify_type, site_photos, map_images, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET
        name = excluded.name,
        location = excluded.location,
        content = excluded.content,
        scoring_method = excluded.scoring_method,
        verify_type = excluded.verify_type,
-       map_files = excluded.map_files,
+       site_photos = excluded.site_photos,
+       map_images = excluded.map_images,
        sort_order = excluded.sort_order`,
     [
       cp.id,
@@ -153,7 +158,8 @@ async function upsertCheckpoint(cp) {
       cp.content,
       cp.scoringMethod,
       cp.verifyType,
-      JSON.stringify(cp.mapFiles || []),
+      JSON.stringify(cp.sitePhotos || []),
+      JSON.stringify(cp.mapImages || []),
       cp.sortOrder ?? 999,
     ]
   );
@@ -161,6 +167,13 @@ async function upsertCheckpoint(cp) {
 }
 
 async function deleteCheckpoint(id) {
+  // 連同這關已上傳到資料庫的圖片一起清掉，避免刪關卡後留下沒有任何關卡引用的孤兒圖片
+  if (hasCheckpoint(id)) {
+    const cp = getCheckpoint(id);
+    await Promise.all(
+      [...cp.sitePhotos, ...cp.mapImages].map((filename) => imageStore.deleteImage(filename))
+    );
+  }
   await db.run("DELETE FROM checkpoint_configs WHERE id = ?", [id]);
   await reload();
 }

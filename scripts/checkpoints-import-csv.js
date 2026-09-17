@@ -1,5 +1,5 @@
 // 把 data/checkpoints.csv 匯入回資料庫的關卡設定。
-// 可以編輯既有關卡的 name／location／content／scoringMethod／mapFiles／verifyType，
+// 可以編輯既有關卡的 name／location／content／scoringMethod／verifyType，
 // 也可以「新增一整列」來新增全新的關卡代號（CSV 裡多出來的 id 會被當成新關卡新增進資料庫）；
 // 如果整列刪掉不留，該關卡也會被一起從資料庫刪除，請小心操作。
 // 需要 DATABASE_URL 環境變數（跟伺服器連同一個資料庫）。
@@ -48,7 +48,11 @@ async function main() {
       return;
     }
 
-    const mapFiles = (row.mapFiles || "")
+    const sitePhotos = (row.sitePhotos || "")
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const mapImages = (row.mapImages || "")
       .split(";")
       .map((s) => s.trim())
       .filter(Boolean);
@@ -59,7 +63,8 @@ async function main() {
       location: row.location || "",
       content: row.content || "",
       scoringMethod: row.scoringMethod || "",
-      mapFiles,
+      sitePhotos,
+      mapImages,
       verifyType,
     });
   });

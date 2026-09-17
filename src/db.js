@@ -111,6 +111,8 @@ CREATE TABLE IF NOT EXISTS broadcasters (
 -- 關卡設定與 10 組路線密語：原本存在 checkpoints.json / teamsRoute.json，
 -- 現在改成存資料庫，讓後台網頁編輯的內容不會被下次部署蓋掉。
 -- 第一次啟動時會自動從 JSON 檔案匯入一份初始值（見 src/config/configStore.js 的 seedIfEmpty）。
+-- site_photos／map_images 是兩種不同用途的圖片（見下方 checkpoint_images 的說明）：
+--   site_photos＝現場照片（這關實際長什麼樣子／任務參考照），map_images＝地圖位置圖（怎麼走到這關）
 CREATE TABLE IF NOT EXISTS checkpoint_configs (
   id              TEXT PRIMARY KEY,
   name            TEXT NOT NULL,
@@ -118,8 +120,21 @@ CREATE TABLE IF NOT EXISTS checkpoint_configs (
   content         TEXT NOT NULL,
   scoring_method  TEXT NOT NULL,
   verify_type     TEXT NOT NULL, -- 'keyword' | 'referee' | 'photo' | 'video'
-  map_files       TEXT NOT NULL DEFAULT '[]', -- JSON 陣列字串，例如 ["B4-1.jpg","B4-2.jpg"]
+  site_photos     TEXT NOT NULL DEFAULT '[]', -- JSON 陣列字串，現場照片檔名
+  map_images      TEXT NOT NULL DEFAULT '[]', -- JSON 陣列字串，地圖位置圖檔名
   sort_order      INTEGER NOT NULL DEFAULT 0
+);
+
+-- 後台網頁上傳的圖片存在這裡（bytea），不是存在網頁服務本機硬碟：
+-- Render 免費方案的網頁服務磁碟是暫時性的，重新部署或閒置關機喚醒都會清空本機檔案，
+-- 必須存資料庫才能保證小編上傳的照片不會無故消失（這也是這個系統從頭到尾用 Postgres 而不用本機檔案的同一個原因）。
+-- 專案原本內建、隨 git 一起部署的示意圖／現場照片（public/maps/ 下）不受影響——
+-- GET /maps/:filename 會先查這張表，查不到才 fallback 到 public/maps/ 的靜態檔案。
+CREATE TABLE IF NOT EXISTS checkpoint_images (
+  filename     TEXT PRIMARY KEY,
+  mime_type    TEXT NOT NULL,
+  data         BYTEA NOT NULL,
+  uploaded_at  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS team_route_configs (
@@ -135,6 +150,28 @@ CREATE INDEX IF NOT EXISTS idx_checkpoint_log_group ON checkpoint_log(group_no);
 CREATE INDEX IF NOT EXISTS idx_transfer_requests_group ON leader_transfer_requests(group_no, status);
 `;
 
+// 既有正式環境的 checkpoint_configs 表原本只有單一欄位 map_files，
+// 這裡把它拆成 site_photos／map_images 兩欄：舊資料本來就是現場照片，直接搬過去，
+// map_images 是全新欄位，之後在後台網頁另外上傳。CREATE TABLE IF NOT EXISTS 不會改動已存在的表，
+// 所以新舊欄位的搬遷要用 ALTER TABLE 額外處理，且要能重複執行不出錯（IF NOT EXISTS／先檢查再 DROP）。
+async function migrateCheckpointImageColumns() {
+  await pool.query(
+    `ALTER TABLE checkpoint_configs ADD COLUMN IF NOT EXISTS site_photos TEXT NOT NULL DEFAULT '[]'`
+  );
+  await pool.query(
+    `ALTER TABLE checkpoint_configs ADD COLUMN IF NOT EXISTS map_images TEXT NOT NULL DEFAULT '[]'`
+  );
+  const oldColumn = await pool.query(
+    `SELECT 1 FROM information_schema.columns WHERE table_name = 'checkpoint_configs' AND column_name = 'map_files'`
+  );
+  if (oldColumn.rows.length > 0) {
+    await pool.query(
+      `UPDATE checkpoint_configs SET site_photos = map_files WHERE map_files IS NOT NULL`
+    );
+    await pool.query(`ALTER TABLE checkpoint_configs DROP COLUMN map_files`);
+  }
+}
+
 async function init() {
   if (!process.env.DATABASE_URL) {
     throw new Error(
@@ -142,6 +179,7 @@ async function init() {
     );
   }
   await pool.query(SCHEMA_SQL);
+  await migrateCheckpointImageColumns();
 }
 
 module.exports = { db, transaction, init, pool };

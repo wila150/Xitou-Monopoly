@@ -1,19 +1,19 @@
 // 後台網頁：登入、關卡與路線設定的 CRUD、即時進度、關主名單。
 // 掛在 src/index.js 的 app.use("/admin", adminRouter)。
-const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const multer = require("multer");
 
 const auth = require("./auth");
 const configStore = require("../config/configStore");
+const imageStore = require("../config/imageStore");
 const teamService = require("../services/teamService");
 
 const router = express.Router();
 const PUBLIC_ADMIN_DIR = path.join(__dirname, "..", "..", "public", "admin");
-const MAPS_DIR = path.join(__dirname, "..", "..", "public", "maps");
 
 const VALID_VERIFY_TYPES = ["keyword", "photo", "video", "referee"];
+const IMAGE_CATEGORIES = { "site-photos": "sitePhotos", "map-images": "mapImages" };
 
 router.use(express.json());
 
@@ -47,15 +47,10 @@ router.get("/login", (req, res) => {
 
 router.use(express.static(PUBLIC_ADMIN_DIR));
 
+// 上傳的圖片先進記憶體，再由 imageStore 存進資料庫（bytea），不落地寫本機硬碟——
+// Render 免費方案的網頁服務磁碟是暫時性的，寫本機檔案的話重新部署／閒置喚醒就會消失。
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: MAPS_DIR,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname) || ".jpg";
-      const safeId = String(req.params.id).replace(/[^A-Za-z0-9_-]/g, "");
-      cb(null, `${safeId}-${Date.now()}${ext}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!/^image\//.test(file.mimetype)) return cb(new Error("只能上傳圖片檔"));
@@ -71,8 +66,7 @@ router.get("/api/checkpoints", (req, res) => {
 
 router.put("/api/checkpoints/:id", async (req, res, next) => {
   try {
-    const { name, location, content, scoringMethod, verifyType, mapFiles, sortOrder } =
-      req.body || {};
+    const { name, location, content, scoringMethod, verifyType, sortOrder } = req.body || {};
     if (!name || !location || !content || !scoringMethod || !verifyType) {
       return res
         .status(400)
@@ -81,6 +75,11 @@ router.put("/api/checkpoints/:id", async (req, res, next) => {
     if (!VALID_VERIFY_TYPES.includes(verifyType)) {
       return res.status(400).json({ error: "verifyType 必須是 keyword / photo / video / referee" });
     }
+    // 圖片（sitePhotos／mapImages）不透過這支存檔 API 改，一律走專用的上傳／刪除端點，
+    // 避免前端表單沒帶到圖片欄位時，不小心把既有圖片清空。
+    const existing = configStore.hasCheckpoint(req.params.id)
+      ? configStore.getCheckpoint(req.params.id)
+      : { sitePhotos: [], mapImages: [] };
     await configStore.upsertCheckpoint({
       id: req.params.id,
       name,
@@ -88,8 +87,9 @@ router.put("/api/checkpoints/:id", async (req, res, next) => {
       content,
       scoringMethod,
       verifyType,
-      mapFiles: Array.isArray(mapFiles) ? mapFiles : [],
-      sortOrder,
+      sitePhotos: existing.sitePhotos,
+      mapImages: existing.mapImages,
+      sortOrder: sortOrder ?? existing.sortOrder,
     });
     res.json({ ok: true, checkpoint: configStore.getCheckpoint(req.params.id) });
   } catch (err) {
@@ -106,26 +106,42 @@ router.delete("/api/checkpoints/:id", async (req, res, next) => {
   }
 });
 
-router.post("/api/checkpoints/:id/image", upload.single("image"), async (req, res, next) => {
+// category 是 "site-photos" 或 "map-images"，見上面的 IMAGE_CATEGORIES 對照表
+// （Express 5 的路由不支援 :param(regex) 這種自訂樣式了，改成收 :category 後手動檢查）
+router.post("/api/checkpoints/:id/:category", upload.single("image"), async (req, res, next) => {
   try {
+    const field = IMAGE_CATEGORIES[req.params.category];
+    if (!field) {
+      return res.status(404).json({ error: "找不到這個路徑" });
+    }
     if (!configStore.hasCheckpoint(req.params.id)) {
       return res.status(404).json({ error: "找不到這個關卡代號，請先建立關卡再上傳圖片" });
     }
     if (!req.file) return res.status(400).json({ error: "沒有收到圖片檔" });
+    const filename = await imageStore.saveImage(
+      req.file.buffer,
+      req.file.mimetype,
+      `${req.params.id}-${req.params.category}`,
+      req.file.originalname
+    );
     const cp = configStore.getCheckpoint(req.params.id);
-    await configStore.upsertCheckpoint({ ...cp, mapFiles: [...cp.mapFiles, req.file.filename] });
+    await configStore.upsertCheckpoint({ ...cp, [field]: [...cp[field], filename] });
     res.json({ ok: true, checkpoint: configStore.getCheckpoint(req.params.id) });
   } catch (err) {
     next(err);
   }
 });
 
-router.delete("/api/checkpoints/:id/image/:filename", async (req, res, next) => {
+router.delete("/api/checkpoints/:id/:category/:filename", async (req, res, next) => {
   try {
+    const field = IMAGE_CATEGORIES[req.params.category];
+    if (!field) {
+      return res.status(404).json({ error: "找不到這個路徑" });
+    }
     const cp = configStore.getCheckpoint(req.params.id);
-    const mapFiles = cp.mapFiles.filter((f) => f !== req.params.filename);
-    await configStore.upsertCheckpoint({ ...cp, mapFiles });
-    fs.unlink(path.join(MAPS_DIR, req.params.filename), () => {});
+    const updated = cp[field].filter((f) => f !== req.params.filename);
+    await configStore.upsertCheckpoint({ ...cp, [field]: updated });
+    await imageStore.deleteImage(req.params.filename);
     res.json({ ok: true, checkpoint: configStore.getCheckpoint(req.params.id) });
   } catch (err) {
     next(err);

@@ -9,11 +9,25 @@ const teamService = require("./services/teamService");
 const scheduler = require("./scheduler");
 const db = require("./db");
 const configStore = require("./config/configStore");
+const imageStore = require("./config/imageStore");
 const adminRouter = require("./admin/router");
 
 const app = express();
 
-// 關卡地圖圖片：/maps/A2.png ...
+// 關卡圖片：/maps/A2.jpg ...
+// 後台網頁上傳的圖片存在資料庫（見 imageStore.js），先查資料庫，查不到再 fallback
+// 到 public/maps/ 底下隨 git 部署的原始示意圖／現場照片。
+app.get("/maps/:filename", async (req, res, next) => {
+  try {
+    const image = await imageStore.getImage(req.params.filename);
+    if (!image) return next();
+    res.set("Content-Type", image.mime_type);
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
+    res.send(image.data);
+  } catch (err) {
+    next(err);
+  }
+});
 app.use("/maps", express.static(path.join(__dirname, "..", "public", "maps")));
 
 app.get("/health", (req, res) => res.status(200).send("ok"));

@@ -44,8 +44,12 @@ function checkpointAnnouncement(checkpointId, { isFirst = false } = {}) {
     `🎮 玩法：${cp.content}\n` +
     `✅ 過關方式：${cp.scoringMethod}`;
   const messages = [textMsg(body)];
-  for (const mapFile of cp.mapFiles || []) {
-    messages.push(imageMsg(mapFile));
+  // 先送地圖位置圖（怎麼走到這關），再送現場照片（這關實際長什麼樣子／任務參考照）
+  for (const mapImage of cp.mapImages || []) {
+    messages.push(imageMsg(mapImage));
+  }
+  for (const sitePhoto of cp.sitePhotos || []) {
+    messages.push(imageMsg(sitePhoto));
   }
   return messages;
 }

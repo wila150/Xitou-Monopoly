@@ -47,15 +47,21 @@ document.getElementById("logout").addEventListener("click", async () => {
 const cpMsg = document.getElementById("cp-msg");
 const cpList = document.getElementById("cp-list");
 
+const IMAGE_CATEGORY_LABELS = { "site-photos": "現場照片", "map-images": "地圖位置圖" };
+
+function imageChipsHtml(files, category) {
+  const chips = (files || [])
+    .map(
+      (f) =>
+        `<span class="chip"><a href="/maps/${f}" target="_blank">${f}</a><button data-action="del-image" data-category="${category}" data-file="${f}">✕</button></span>`
+    )
+    .join("");
+  return chips || "（尚未上傳）";
+}
+
 function cpCardHtml(cp) {
   const options = VERIFY_TYPES
     .map((t) => `<option value="${t.value}" ${cp.verifyType === t.value ? "selected" : ""}>${t.label}</option>`)
-    .join("");
-  const chips = (cp.mapFiles || [])
-    .map(
-      (f) =>
-        `<span class="chip"><a href="/maps/${f}" target="_blank">${f}</a><button data-action="del-image" data-file="${f}">✕</button></span>`
-    )
     .join("");
   return `
     <details class="cp-card" data-id="${cp.id}">
@@ -68,9 +74,14 @@ function cpCardHtml(cp) {
       <div class="field"><label>通關方式</label><select class="f-verify">${options}</select></div>
       <div class="field"><label>排序（數字越小越前面）</label><input class="f-sort" type="number" value="${cp.sortOrder ?? 0}" /></div>
       <div class="field">
-        <label>現場圖片</label>
-        <div class="map-files">${chips || "（尚未上傳）"}</div>
-        <input type="file" class="f-image" accept="image/*" style="margin-top:6px" />
+        <label>現場照片（這關實際長什麼樣子／任務參考照）</label>
+        <div class="map-files" data-category="site-photos">${imageChipsHtml(cp.sitePhotos, "site-photos")}</div>
+        <input type="file" class="f-image" data-category="site-photos" accept="image/*" style="margin-top:6px" />
+      </div>
+      <div class="field">
+        <label>地圖位置圖（怎麼走到這關）</label>
+        <div class="map-files" data-category="map-images">${imageChipsHtml(cp.mapImages, "map-images")}</div>
+        <input type="file" class="f-image" data-category="map-images" accept="image/*" style="margin-top:6px" />
       </div>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button class="btn" data-action="save">💾 儲存</button>
@@ -100,7 +111,6 @@ cpList.addEventListener("click", async (e) => {
         scoringMethod: card.querySelector(".f-scoring").value.trim(),
         verifyType: card.querySelector(".f-verify").value,
         sortOrder: Number(card.querySelector(".f-sort").value) || 0,
-        mapFiles: Array.from(card.querySelectorAll(".map-files .chip")).map((c) => c.dataset.file),
       };
       await api(`/api/checkpoints/${id}`, { method: "PUT", body: JSON.stringify(body) });
       showMsg(cpMsg, `已儲存「${id}」`, false);
@@ -125,9 +135,10 @@ cpList.addEventListener("click", async (e) => {
   if (e.target.dataset.action === "del-image") {
     e.preventDefault();
     const file = e.target.dataset.file;
+    const category = e.target.dataset.category;
     try {
-      await api(`/api/checkpoints/${id}/image/${encodeURIComponent(file)}`, { method: "DELETE" });
-      showMsg(cpMsg, "已移除圖片", false);
+      await api(`/api/checkpoints/${id}/${category}/${encodeURIComponent(file)}`, { method: "DELETE" });
+      showMsg(cpMsg, `已移除${IMAGE_CATEGORY_LABELS[category]}`, false);
       await loadCheckpoints();
     } catch (err) {
       showMsg(cpMsg, err.message, true);
@@ -139,15 +150,16 @@ cpList.addEventListener("change", async (e) => {
   if (!e.target.classList.contains("f-image")) return;
   const card = e.target.closest(".cp-card");
   const id = card.dataset.id;
+  const category = e.target.dataset.category;
   const file = e.target.files[0];
   if (!file) return;
   const formData = new FormData();
   formData.append("image", file);
   try {
-    const res = await fetch(`/admin/api/checkpoints/${id}/image`, { method: "POST", body: formData });
+    const res = await fetch(`/admin/api/checkpoints/${id}/${category}`, { method: "POST", body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "上傳失敗");
-    showMsg(cpMsg, "圖片已上傳", false);
+    showMsg(cpMsg, `${IMAGE_CATEGORY_LABELS[category]}已上傳`, false);
     await loadCheckpoints();
   } catch (err) {
     showMsg(cpMsg, err.message, true);
@@ -167,7 +179,6 @@ document.getElementById("add-cp").addEventListener("click", async () => {
         content: "請填寫關卡內容說明",
         scoringMethod: "請填寫計分方式",
         verifyType: "keyword",
-        mapFiles: [],
         sortOrder: 999,
       }),
     });

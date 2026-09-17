@@ -15,7 +15,7 @@ async function main() {
 
   const checkpoints = configStore.getAllCheckpoints();
   const rows = [
-    ["id", "name", "location", "content", "scoringMethod", "mapFiles", "verifyType"],
+    ["id", "name", "location", "content", "scoringMethod", "sitePhotos", "mapImages", "verifyType"],
   ];
   for (const cp of checkpoints) {
     rows.push([
@@ -24,7 +24,8 @@ async function main() {
       cp.location,
       cp.content,
       cp.scoringMethod,
-      (cp.mapFiles || []).join(";"),
+      (cp.sitePhotos || []).join(";"),
+      (cp.mapImages || []).join(";"),
       cp.verifyType,
     ]);
   }
@@ -36,7 +37,8 @@ async function main() {
     "請用 Excel／Google Sheets 編輯 name／location／content／scoringMethod（id、verifyType 請勿更動）。"
   );
   console.log(
-    "mapFiles 一格可以放多張圖片檔名，用「;」分隔（例如 B4-1.jpg;B4-2.jpg），沒有圖片就留空。存檔後執行："
+    "sitePhotos（現場照片）／mapImages（地圖位置圖）一格可以放多張圖片檔名，用「;」分隔，沒有圖片就留空。" +
+      "這兩欄只是參考現有檔名，實際上傳／刪除圖片請用後台網頁（/admin），這裡改檔名不會真的搬動圖片。存檔後執行："
   );
   console.log("  npm run checkpoints:import");
 
