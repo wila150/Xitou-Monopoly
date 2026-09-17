@@ -31,6 +31,11 @@ async function handleEvent(event) {
     const userId = event.source && event.source.userId;
     if (!userId) return;
 
+    console.log(
+      `收到訊息：userId=${userId} type=${event.message.type}` +
+        (event.message.type === "text" ? ` text=${JSON.stringify(event.message.text)}` : "")
+    );
+
     let result;
     if (event.message.type === "text") {
       result = await commandRouter.route(userId, event.message.text);
@@ -43,6 +48,9 @@ async function handleEvent(event) {
     }
 
     const { reply, groupBroadcasts, directPushes } = result;
+    console.log(
+      `處理結果：reply=${reply ? reply.length + "則" : "無"} groupBroadcasts=${groupBroadcasts.length} directPushes=${directPushes.length}`
+    );
     const tasks = [];
     if (reply) tasks.push(lineClient.reply(event.replyToken, reply));
     for (const b of groupBroadcasts) {
@@ -53,6 +61,7 @@ async function handleEvent(event) {
       tasks.push(lineClient.push(p.to, p.messages));
     }
     await Promise.all(tasks);
+    console.log("回覆／推播已送出");
   } catch (err) {
     console.error("處理 LINE 事件時發生錯誤：", err);
     // 保底回覆：讓使用者知道系統出錯了，而不是完全沒有任何回應
