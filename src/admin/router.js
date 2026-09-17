@@ -75,23 +75,32 @@ router.put("/api/checkpoints/:id", async (req, res, next) => {
     if (!VALID_VERIFY_TYPES.includes(verifyType)) {
       return res.status(400).json({ error: "verifyType 必須是 keyword / photo / video / referee" });
     }
-    // 圖片（sitePhotos／mapImages）不透過這支存檔 API 改，一律走專用的上傳／刪除端點，
-    // 避免前端表單沒帶到圖片欄位時，不小心把既有圖片清空。
-    const existing = configStore.hasCheckpoint(req.params.id)
-      ? configStore.getCheckpoint(req.params.id)
-      : { sitePhotos: [], mapImages: [] };
-    await configStore.upsertCheckpoint({
-      id: req.params.id,
-      name,
-      location,
-      content,
-      scoringMethod,
-      verifyType,
-      sitePhotos: existing.sitePhotos,
-      mapImages: existing.mapImages,
-      sortOrder: sortOrder ?? existing.sortOrder,
-    });
-    res.json({ ok: true, checkpoint: configStore.getCheckpoint(req.params.id) });
+    const id = req.params.id;
+    if (configStore.hasCheckpoint(id)) {
+      // 只改一般欄位，不動 site_photos／map_images，避免跟同時發生的圖片上傳／刪除互相蓋掉
+      await configStore.updateCheckpointFields({
+        id,
+        name,
+        location,
+        content,
+        scoringMethod,
+        verifyType,
+        sortOrder,
+      });
+    } else {
+      await configStore.upsertCheckpoint({
+        id,
+        name,
+        location,
+        content,
+        scoringMethod,
+        verifyType,
+        sitePhotos: [],
+        mapImages: [],
+        sortOrder,
+      });
+    }
+    res.json({ ok: true, checkpoint: configStore.getCheckpoint(id) });
   } catch (err) {
     next(err);
   }
@@ -124,8 +133,7 @@ router.post("/api/checkpoints/:id/:category", upload.single("image"), async (req
       `${req.params.id}-${req.params.category}`,
       req.file.originalname
     );
-    const cp = configStore.getCheckpoint(req.params.id);
-    await configStore.upsertCheckpoint({ ...cp, [field]: [...cp[field], filename] });
+    await configStore.appendCheckpointImage(req.params.id, field, filename);
     res.json({ ok: true, checkpoint: configStore.getCheckpoint(req.params.id) });
   } catch (err) {
     next(err);
@@ -138,9 +146,7 @@ router.delete("/api/checkpoints/:id/:category/:filename", async (req, res, next)
     if (!field) {
       return res.status(404).json({ error: "找不到這個路徑" });
     }
-    const cp = configStore.getCheckpoint(req.params.id);
-    const updated = cp[field].filter((f) => f !== req.params.filename);
-    await configStore.upsertCheckpoint({ ...cp, [field]: updated });
+    await configStore.removeCheckpointImage(req.params.id, field, req.params.filename);
     await imageStore.deleteImage(req.params.filename);
     res.json({ ok: true, checkpoint: configStore.getCheckpoint(req.params.id) });
   } catch (err) {

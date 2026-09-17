@@ -166,6 +166,53 @@ async function upsertCheckpoint(cp) {
   await reload();
 }
 
+// 只更新一般欄位（不含 site_photos／map_images），給後台網頁「儲存」按鈕用。
+// 刻意不去動圖片欄位，避免「按儲存」跟「上傳／刪除圖片」兩個請求前後腳送出時，
+// 儲存那邊帶著舊的圖片清單快照把剛上傳的圖片蓋掉（read-modify-write 競爭問題）。
+async function updateCheckpointFields(cp) {
+  await db.run(
+    `UPDATE checkpoint_configs
+     SET name = ?, location = ?, content = ?, scoring_method = ?, verify_type = ?,
+         sort_order = COALESCE(?, sort_order)
+     WHERE id = ?`,
+    [cp.name, cp.location, cp.content, cp.scoringMethod, cp.verifyType, cp.sortOrder ?? null, cp.id]
+  );
+  await reload();
+}
+
+// 圖片新增／刪除改用資料庫端的 jsonb 陣列運算做原子更新，不用「讀出陣列、在 JS 改、整包寫回」，
+// 理由同上：避免跟其他同時發生的寫入互相蓋掉彼此的圖片清單。
+function imageColumn(field) {
+  if (field === "sitePhotos") return "site_photos";
+  if (field === "mapImages") return "map_images";
+  throw new Error(`未知的圖片欄位：${field}`);
+}
+
+async function appendCheckpointImage(id, field, filename) {
+  const column = imageColumn(field);
+  await db.run(
+    `UPDATE checkpoint_configs
+     SET ${column} = (COALESCE(${column}::jsonb, '[]'::jsonb) || to_jsonb(?::text))::text
+     WHERE id = ?`,
+    [filename, id]
+  );
+  await reload();
+}
+
+async function removeCheckpointImage(id, field, filename) {
+  const column = imageColumn(field);
+  await db.run(
+    `UPDATE checkpoint_configs
+     SET ${column} = COALESCE(
+       (SELECT jsonb_agg(elem) FROM jsonb_array_elements_text(${column}::jsonb) elem WHERE elem <> ?),
+       '[]'::jsonb
+     )::text
+     WHERE id = ?`,
+    [filename, id]
+  );
+  await reload();
+}
+
 async function deleteCheckpoint(id) {
   // 連同這關已上傳到資料庫的圖片一起清掉，避免刪關卡後留下沒有任何關卡引用的孤兒圖片
   if (hasCheckpoint(id)) {
@@ -229,6 +276,9 @@ module.exports = {
   getRoute,
   getAllGroupNos,
   upsertCheckpoint,
+  updateCheckpointFields,
+  appendCheckpointImage,
+  removeCheckpointImage,
   deleteCheckpoint,
   setTeamRoute,
   deleteTeamRoute,
