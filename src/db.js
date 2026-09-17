@@ -95,6 +95,35 @@ CREATE TABLE IF NOT EXISTS settings (
   value  TEXT NOT NULL
 );
 
+-- 關主自己傳「我是 B3 關主」登記，之後這個帳號打「通過 X組」只對登記的那一關生效
+CREATE TABLE IF NOT EXISTS referees (
+  user_id        TEXT PRIMARY KEY,
+  checkpoint_id  TEXT NOT NULL,
+  registered_at  TEXT NOT NULL
+);
+
+-- 關卡設定與 10 組路線密語：原本存在 checkpoints.json / teamsRoute.json，
+-- 現在改成存資料庫，讓後台網頁編輯的內容不會被下次部署蓋掉。
+-- 第一次啟動時會自動從 JSON 檔案匯入一份初始值（見 src/config/configStore.js 的 seedIfEmpty）。
+CREATE TABLE IF NOT EXISTS checkpoint_configs (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  location        TEXT NOT NULL,
+  content         TEXT NOT NULL,
+  scoring_method  TEXT NOT NULL,
+  verify_type     TEXT NOT NULL, -- 'keyword' | 'referee' | 'photo' | 'video'
+  map_files       TEXT NOT NULL DEFAULT '[]', -- JSON 陣列字串，例如 ["B4-1.jpg","B4-2.jpg"]
+  sort_order      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS team_route_configs (
+  group_no       INTEGER NOT NULL,
+  order_index    INTEGER NOT NULL,
+  checkpoint_id  TEXT NOT NULL,
+  keyword        TEXT,
+  PRIMARY KEY (group_no, order_index)
+);
+
 CREATE INDEX IF NOT EXISTS idx_team_members_group ON team_members(group_no);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_log_group ON checkpoint_log(group_no);
 CREATE INDEX IF NOT EXISTS idx_transfer_requests_group ON leader_transfer_requests(group_no, status);

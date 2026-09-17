@@ -1,11 +1,12 @@
 const teamService = require("../services/teamService");
-const { isAdmin, canApproveCheckpoint } = require("../config/admins");
+const { isAdmin } = require("../config/admins");
 
 const CHECKIN_RE = /^報到\s*(\d{1,2})\s*組$/;
 const DEPART_RE = /^出發\s*(\d{1,2})\s*組$/;
 const ARRIVE_RE = /^到站\s*(\d{1,2})\s*組$/;
 const APPROVE_RE = /^通過\s*(\d{1,2})\s*組$/;
 const REVERT_RE = /^退回\s*(\d{1,2})\s*組$/;
+const REGISTER_REFEREE_RE = /^我是\s*([A-Za-z]\d)\s*關主$/;
 const TRANSFER_REQUEST_RE = /^接任隊長\s*(\d{1,2})\s*組$/;
 const TRANSFER_CONFIRM_RE = /^確認換隊長\s*(\d{1,2})\s*組$/;
 const UNBIND_RE = /^解除綁定\s*(\d{1,2})\s*組$/;
@@ -54,11 +55,21 @@ async function route(userId, rawText) {
     };
   }
 
+  if ((m = text.match(REGISTER_REFEREE_RE))) {
+    // 關主自助登記：「我是 B3 關主」，同一帳號再傳一次會直接覆蓋成新的登記
+    const checkpointId = m[1].toUpperCase();
+    return withReply(await teamService.registerReferee(userId, checkpointId));
+  }
+
   if ((m = text.match(APPROVE_RE))) {
-    // 小編或登記過的關主確認目前這關已完成，解鎖下一關（不限關卡類型：關主關卡或照片／影片皆可用）
-    if (!canApproveCheckpoint(userId)) return approveOnlyDenied();
+    // 小編：對任何關卡都能直接喊過。登記過的關主：只能核准自己登記的那一關。
     const groupNo = Number(m[1]);
-    const result = await teamService.approveCheckpoint(groupNo);
+    let restrictToCheckpointId = null;
+    if (!isAdmin(userId)) {
+      restrictToCheckpointId = await teamService.getRefereeCheckpoint(userId);
+      if (!restrictToCheckpointId) return approveOnlyDenied();
+    }
+    const result = await teamService.approveCheckpoint(groupNo, restrictToCheckpointId);
     return {
       reply: result.reply,
       groupBroadcasts: result.groupBroadcast ? [result.groupBroadcast] : [],
@@ -129,6 +140,11 @@ async function route(userId, rawText) {
   if (text === "重置遊戲 確認" || text === "重置遊戲確認") {
     if (!isAdmin(userId)) return adminOnlyDenied();
     return withReply(await teamService.resetGame());
+  }
+
+  if (text === "重置關主") {
+    if (!isAdmin(userId)) return adminOnlyDenied();
+    return withReply(await teamService.resetReferees());
   }
 
   if (text === "重置遊戲") {

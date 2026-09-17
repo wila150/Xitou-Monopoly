@@ -8,19 +8,20 @@ process.env.DATABASE_URL =
 process.env.PGSSL = "false";
 process.env.PUBLIC_BASE_URL = "https://example.com";
 process.env.ADMIN_USER_IDS = "Uadmin";
-process.env.STAFF_USER_IDS = "Ustaff";
 
 const dbModule = require("../src/db");
+const configStore = require("../src/config/configStore");
 const commandRouter = require("../src/handlers/commandRouter");
 const teamService = require("../src/services/teamService");
 const { getRoute } = require("../src/config/teamsRoute");
-const { checkpoints } = require("../src/config/checkpoints");
+const { getCheckpoint } = require("../src/config/checkpoints");
 
 const ADMIN = "Uadmin";
-const STAFF = "Ustaff";
+const STAFF = "Ustaff"; // 一般（非小編）測試帳號，用來測關主自助登記
 
 test.before(async () => {
   await dbModule.init();
+  await configStore.init();
 });
 
 test.after(async () => {
@@ -98,7 +99,7 @@ test("關鍵字：答錯提示錯誤、答對晉級、全破後提示前往B6", 
 
   const route = getRoute(1);
   const firstKeywordIndex = route.findIndex(
-    (s) => checkpoints[s.checkpointId].verifyType === "keyword"
+    (s) => getCheckpoint(s.checkpointId).verifyType === "keyword"
   );
   for (let i = 0; i < firstKeywordIndex; i++) {
     await passMediaCheckpoint("Uleader", 1);
@@ -107,7 +108,7 @@ test("關鍵字：答錯提示錯誤、答對晉級、全破後提示前往B6", 
   assert.match(textsOf(wrong)[0], /不正確/);
   for (let i = firstKeywordIndex; i < route.length - 1; i++) {
     const step = route[i];
-    const cp = checkpoints[step.checkpointId];
+    const cp = getCheckpoint(step.checkpointId);
     if (cp.verifyType === "keyword") {
       const result = await commandRouter.route("Uleader", step.keyword);
       assert.match(textsOf(result)[0], /✅ 通關/);
@@ -117,7 +118,7 @@ test("關鍵字：答錯提示錯誤、答對晉級、全破後提示前往B6", 
     }
   }
   const last = route[route.length - 1];
-  const lastCp = checkpoints[last.checkpointId];
+  const lastCp = getCheckpoint(last.checkpointId);
   let lastReply;
   if (lastCp.verifyType === "keyword") {
     lastReply = textsOf(await commandRouter.route("Uleader", last.keyword));
@@ -173,7 +174,7 @@ test("關卡型態不符：關主關卡上傳照片、無關主關卡輸入文�
   // 走到下一個關主(keyword)關卡前
   const route = getRoute(1);
   const keywordIndex = route.findIndex(
-    (s) => checkpoints[s.checkpointId].verifyType === "keyword"
+    (s) => getCheckpoint(s.checkpointId).verifyType === "keyword"
   );
   for (let i = 0; i < keywordIndex; i++) {
     await passMediaCheckpoint("Uleader", 1);
@@ -191,7 +192,7 @@ test("通過指令不限關卡類型：小編也可以對關主關卡直接喊�
   // 走到第一個關主(keyword)關卡
   const route = getRoute(1);
   const keywordIndex = route.findIndex(
-    (s) => checkpoints[s.checkpointId].verifyType === "keyword"
+    (s) => getCheckpoint(s.checkpointId).verifyType === "keyword"
   );
   for (let i = 0; i < keywordIndex; i++) {
     await passMediaCheckpoint("Uleader", 1);
@@ -274,7 +275,7 @@ test("遊戲結束：只凍結關卡進度，不會產生終點確認，之後�
   // 凍結後嘗試過關會被拒絕
   const route = getRoute(1);
   const firstKeywordStep = route.find(
-    (s) => checkpoints[s.checkpointId].verifyType === "keyword"
+    (s) => getCheckpoint(s.checkpointId).verifyType === "keyword"
   );
   const frozenAttempt = await commandRouter.route("Uleader", firstKeywordStep.keyword);
   assert.match(textsOf(frozenAttempt)[0], /已停止受理新的關卡進度/);
@@ -442,23 +443,64 @@ test("逾時判斷是看「出發後經過多久」，不是比對當天固定�
   assert.equal((await teamService.findTeam(2)).is_late, 1);
 });
 
-test("關主名單：登記過的關主可以用「通過」，但用不了其他管理指令", async () => {
+test("關主自助登記：「我是 B3 關主」後可以用通過，但只對自己登記的那一關生效", async () => {
   await resetGame();
   await commandRouter.route("Uleader", "報到 1組");
   await commandRouter.route(ADMIN, "出發 1組");
 
-  const approve = await commandRouter.route(STAFF, "通過 1組");
-  assert.match(textsOf(approve)[0], /已為第 1 組確認/);
+  const register = await commandRouter.route(STAFF, "我是B3關主");
+  assert.match(textsOf(register)[0], /已登記為「救救菜英文」（B3）的關主/);
+
+  // 第1組路線第一關是 D5，不是 B3，登記為 B3 關主的人現在核准不了
+  const wrongScope = await commandRouter.route(STAFF, "通過 1組");
+  assert.match(textsOf(wrongScope)[0], /不是您登記的關卡/);
+  assert.equal((await teamService.findTeam(1)).current_index, 0);
+
+  // 先讓第1組過第1關（D5，用小編身分）
+  await commandRouter.route(ADMIN, "通過 1組");
   assert.equal((await teamService.findTeam(1)).current_index, 1);
+
+  // 現在第1組在 B3，登記為 B3 關主的人可以核准了
+  const rightScope = await commandRouter.route(STAFF, "通過 1組");
+  assert.match(textsOf(rightScope)[0], /已為第 1 組確認/);
+  assert.equal((await teamService.findTeam(1)).current_index, 2);
 
   const deniedProgress = await commandRouter.route(STAFF, "進度");
   assert.match(textsOf(deniedProgress)[0], /僅限小編使用/);
-
-  const deniedReset = await commandRouter.route(STAFF, "重置遊戲");
-  assert.match(textsOf(deniedReset)[0], /僅限小編使用/);
 });
 
-test("關主直接喊過制（B3/B4/D6/C4）：隊伍打密語或傳照片都沒用，只能靠通過指令", async () => {
+test("關主自助登記：同一帳號重新登記會覆蓋成新的關卡", async () => {
+  await resetGame();
+  await commandRouter.route(STAFF, "我是B3關主");
+  assert.equal(await teamService.getRefereeCheckpoint(STAFF), "B3");
+
+  await commandRouter.route(STAFF, "我是B4關主");
+  assert.equal(await teamService.getRefereeCheckpoint(STAFF), "B4");
+});
+
+test("關主自助登記：已經報到綁定隊伍的人不能登記成關主（防止自己核准自己）", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+
+  const denied = await commandRouter.route("Uleader", "我是B3關主");
+  assert.match(textsOf(denied)[0], /已經是第 1 組的成員，無法同時登記為關主/);
+  assert.equal(await teamService.getRefereeCheckpoint("Uleader"), null);
+});
+
+test("重置關主：小編可以清空所有關主登記，非小編不能用", async () => {
+  await resetGame();
+  await commandRouter.route(STAFF, "我是B3關主");
+  assert.equal(await teamService.getRefereeCheckpoint(STAFF), "B3");
+
+  const denied = await commandRouter.route(STAFF, "重置關主");
+  assert.match(textsOf(denied)[0], /僅限小編使用/);
+
+  const reset = await commandRouter.route(ADMIN, "重置關主");
+  assert.match(textsOf(reset)[0], /已清空所有關主登記/);
+  assert.equal(await teamService.getRefereeCheckpoint(STAFF), null);
+});
+
+test("關主直接喊過制（B3/B4/D6/C4）：隊伍打密語或傳照片都沒用，只能靠小編通過指令", async () => {
   await resetGame();
   await commandRouter.route("Uleader", "報到 1組");
   await commandRouter.route(ADMIN, "出發 1組");
@@ -477,7 +519,24 @@ test("關主直接喊過制（B3/B4/D6/C4）：隊伍打密語或傳照片都沒
   // 進度應該還在原地，沒有因為上面兩次錯誤嘗試而前進
   assert.equal((await teamService.findTeam(1)).current_index, 1);
 
-  const approve = await commandRouter.route(STAFF, "通過 1組");
+  const approve = await commandRouter.route(ADMIN, "通過 1組");
   assert.match(textsOf(approve)[0], /已為第 1 組確認「救救菜英文」通過/);
   assert.equal((await teamService.findTeam(1)).current_index, 2);
+});
+
+test("密語比對：自動忽略頭尾空白與大小寫，支援用「｜」分隔多個都算對的答案", async () => {
+  await resetGame();
+  // 用一個沒人用過的組別編號（99），順便也驗證了 setTeamRoute 能新增全新的組別
+  await configStore.setTeamRoute(99, [{ checkpointId: "A3", keyword: "紅檜｜紅檜木" }]);
+  await commandRouter.route("Uleader", "報到 99組");
+  await commandRouter.route(ADMIN, "出發 99組");
+
+  const wrong = await commandRouter.route("Uleader", "香杉");
+  assert.match(textsOf(wrong)[0], /不正確/);
+
+  const withSpacesAndCase = await commandRouter.route("Uleader", "  紅檜木  ");
+  assert.match(textsOf(withSpacesAndCase)[0], /✅ 通關/);
+
+  // 測完清掉臨時組別，避免留在共用測試資料庫裡影響之後的測試
+  await configStore.deleteTeamRoute(99);
 });

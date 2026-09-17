@@ -9,6 +9,20 @@ function textMsg(text) {
   return { type: "text", text };
 }
 
+// 密語／答案比對：自動去除頭尾空白、忽略大小寫；一關可以有多個都算對的答案，
+// 在 keyword 欄位裡用「｜」或「|」分隔（例如「紅檜｜紅檜木」兩個都算對）。
+function normalizeAnswer(text) {
+  return String(text ?? "").trim().toLowerCase();
+}
+
+function matchesKeyword(inputText, expectedKeyword) {
+  const accepted = String(expectedKeyword ?? "")
+    .split(/[｜|]/)
+    .map((s) => normalizeAnswer(s))
+    .filter(Boolean);
+  return accepted.includes(normalizeAnswer(inputText));
+}
+
 function mapUrl(mapFile) {
   const base = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
   return `${base}/maps/${mapFile}`;
@@ -228,7 +242,7 @@ async function verifyKeyword(userId, text) {
       const kind = cp.verifyType === "video" ? "影片" : "照片";
       return [textMsg(`這一關沒有現場關主，請直接上傳${kind}，不需要輸入文字關鍵字。`)];
     }
-    if (text !== expected.keyword) {
+    if (!matchesKeyword(text, expected.keyword)) {
       return [textMsg("❌ 不正確，請向關主確認。")];
     }
 
@@ -276,10 +290,11 @@ async function submitMedia(userId) {
 }
 
 // ---- 三之三、小編手動核准目前這關（適用任何類型：關主關卡或照片／影片關卡）----
-// 主要給無關主的 6 關（照片／影片送審後用）；但小編也可以對任何關卡直接喊過，
-// 當作「隊伍已回報完成、小編確認即可」的通用捷徑，不限定關卡類型。
+// 小編（不傳 restrictToCheckpointId）對任何關卡都能直接喊過；
+// 登記過的關主（有傳 restrictToCheckpointId）只能核准「該組目前剛好在自己登記的那一關」，
+// 避免關主誤觸或跨關卡核准到不相關的隊伍。
 
-async function approveCheckpoint(groupNo) {
+async function approveCheckpoint(groupNo, restrictToCheckpointId = null) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
@@ -310,12 +325,81 @@ async function approveCheckpoint(groupNo) {
     const expected = route[team.current_index];
     const cp = getCheckpoint(expected.checkpointId);
 
+    if (restrictToCheckpointId && expected.checkpointId !== restrictToCheckpointId) {
+      return {
+        reply: [
+          textMsg(
+            `第 ${groupNo} 組目前這關是「${cp.name}」（${cp.id}），不是您登記的關卡，無法用這個帳號通過。`
+          ),
+        ],
+      };
+    }
+
     const teamMessages = await advanceCheckpoint(tx, team, expected, cp, route);
     return {
       reply: [textMsg(`已為第 ${groupNo} 組確認「${cp.name}」通過。`)],
       groupBroadcast: { groupNo, messages: teamMessages },
     };
   });
+}
+
+// ---- 三之五、關主自助登記：「我是 B3 關主」----
+// 防呆：已經報到綁定某一組的人不能再登記成關主，避免隊伍自己登記自己那關的關主幫自己過關。
+
+async function registerReferee(userId, checkpointId) {
+  let cp;
+  try {
+    cp = getCheckpoint(checkpointId);
+  } catch {
+    return [textMsg(`找不到關卡代號「${checkpointId}」，請確認輸入是否正確。`)];
+  }
+
+  const membership = await findMembership(db, userId);
+  if (membership) {
+    return [
+      textMsg(
+        `您已經是第 ${membership.group_no} 組的成員，無法同時登記為關主。若這是誤觸的隊伍報到，請聯繫小編協助「解除綁定」後再重新登記。`
+      ),
+    ];
+  }
+
+  await db.run(
+    `INSERT INTO referees (user_id, checkpoint_id, registered_at) VALUES (?, ?, ?)
+     ON CONFLICT (user_id) DO UPDATE SET checkpoint_id = excluded.checkpoint_id, registered_at = excluded.registered_at`,
+    [userId, checkpointId, nowIso()]
+  );
+
+  return [
+    textMsg(
+      `✅ 已登記為「${cp.name}」（${cp.id}）的關主。之後隊伍在這一關完成任務後，直接輸入「通過 X組」即可為該組解鎖下一關。`
+    ),
+  ];
+}
+
+async function getRefereeCheckpoint(userId) {
+  const row = await db.get("SELECT checkpoint_id FROM referees WHERE user_id = ?", [
+    userId,
+  ]);
+  return row ? row.checkpoint_id : null;
+}
+
+// 小編專用：清空所有關主登記（跟「重置遊戲」分開，不會因為重置整場遊戲而被順便清掉，
+// 需要的時候才手動清，例如發現有人誤登記、或活動結束後要收回名單）
+async function resetReferees() {
+  await db.run("DELETE FROM referees");
+  return [textMsg("♻️ 已清空所有關主登記，需要的人請重新輸入「我是 XX 關主」登記。")];
+}
+
+// 給後台網頁看目前有哪些人登記成哪一關的關主（不含 userId 全碼，只顯示末 6 碼方便辨識，保留一點隱私）
+async function listReferees() {
+  const rows = await db.all(
+    "SELECT user_id, checkpoint_id, registered_at FROM referees ORDER BY checkpoint_id"
+  );
+  return rows.map((r) => ({
+    userIdSuffix: r.user_id.slice(-6),
+    checkpointId: r.checkpoint_id,
+    registeredAt: r.registered_at,
+  }));
 }
 
 // ---- 三之四、退回一關（更正「通過」／「到站」誤觸或手滑重複的情況）----
@@ -629,6 +713,37 @@ async function adminListProgress() {
   return [textMsg(`📋 目前進度\n${lines.join("\n")}`)];
 }
 
+// 給後台網頁用的 JSON 版進度快照（跟 adminListProgress 同一份資料，只是格式給網頁用而不是 LINE 文字）
+async function getProgressSnapshot() {
+  const groupNos = getAllGroupNos();
+  const teams = await Promise.all(groupNos.map((groupNo) => findTeam(db, groupNo)));
+  return groupNos.map((groupNo, i) => {
+    const team = teams[i];
+    if (!team) {
+      return { groupNo, status: "NOT_CHECKED_IN" };
+    }
+    const base = {
+      groupNo,
+      status: team.status,
+      currentIndex: team.current_index,
+      totalCheckpoints: event.totalCheckpoints,
+      startTime: team.start_time,
+    };
+    if (team.status === "FINISHED") {
+      return {
+        ...base,
+        finishTime: team.finish_time,
+        isLate: !!team.is_late,
+        elapsed: formatElapsed(team.start_time, team.finish_time),
+      };
+    }
+    if (team.status === "IN_PROGRESS") {
+      return { ...base, elapsed: formatElapsed(team.start_time, nowIso()) };
+    }
+    return base; // CHECKED_IN
+  });
+}
+
 // ---- 十、排行榜 ----
 
 async function isRankingPublic() {
@@ -710,6 +825,10 @@ module.exports = {
   verifyKeyword,
   submitMedia,
   approveCheckpoint,
+  registerReferee,
+  getRefereeCheckpoint,
+  resetReferees,
+  listReferees,
   revertLastCheckpoint,
   finishAtB6,
   freezeProgress,
@@ -720,6 +839,7 @@ module.exports = {
   queryCurrentCheckpoint,
   queryProgress,
   adminListProgress,
+  getProgressSnapshot,
   isRankingPublic,
   setRankingPublic,
   formatRanking,

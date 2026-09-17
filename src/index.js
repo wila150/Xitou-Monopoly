@@ -8,6 +8,8 @@ const commandRouter = require("./handlers/commandRouter");
 const teamService = require("./services/teamService");
 const scheduler = require("./scheduler");
 const db = require("./db");
+const configStore = require("./config/configStore");
+const adminRouter = require("./admin/router");
 
 const app = express();
 
@@ -15,6 +17,8 @@ const app = express();
 app.use("/maps", express.static(path.join(__dirname, "..", "public", "maps")));
 
 app.get("/health", (req, res) => res.status(200).send("ok"));
+
+app.use("/admin", adminRouter);
 
 app.post("/webhook", lineClient.webhookMiddleware, async (req, res) => {
   // 先回 200，避免 LINE 平台因處理耗時而重送 webhook
@@ -80,6 +84,7 @@ async function handleEvent(event) {
 const PORT = process.env.PORT || 3000;
 
 db.init()
+  .then(() => configStore.init())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`LINE 闖關系統伺服器已啟動，監聽埠 ${PORT}`);

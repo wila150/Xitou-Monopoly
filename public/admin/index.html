@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>後台管理｜溪頭大富翁</title>
+<link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <header>
+    <h1>🌲 森呼吸．永續漫遊｜後台管理</h1>
+    <button id="logout">登出</button>
+  </header>
+
+  <nav>
+    <button class="tab-btn active" data-tab="checkpoints">關卡設定</button>
+    <button class="tab-btn" data-tab="routes">組別路線</button>
+    <button class="tab-btn" data-tab="progress">即時進度</button>
+    <button class="tab-btn" data-tab="referees">關主名單</button>
+  </nav>
+
+  <main>
+    <!-- 關卡設定 -->
+    <section class="panel active" id="panel-checkpoints">
+      <div class="toolbar">
+        <input id="new-cp-id" placeholder="新關卡代號，例如 E4" />
+        <button class="btn" id="add-cp">＋ 新增關卡</button>
+      </div>
+      <div class="msg" id="cp-msg"></div>
+      <div class="card-list" id="cp-list"></div>
+    </section>
+
+    <!-- 組別路線 -->
+    <section class="panel" id="panel-routes">
+      <div class="toolbar">
+        <input id="new-group-no" type="number" min="1" placeholder="新組別編號，例如 11" />
+        <button class="btn" id="add-group">＋ 新增組別</button>
+      </div>
+      <div class="msg" id="route-msg"></div>
+      <div id="route-list"></div>
+    </section>
+
+    <!-- 即時進度 -->
+    <section class="panel" id="panel-progress">
+      <div class="toolbar">
+        <button class="btn secondary" id="refresh-progress">🔄 重新整理</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>組別</th><th>狀態</th><th>進度</th><th>經過時間</th><th>逾時</th></tr>
+        </thead>
+        <tbody id="progress-body"></tbody>
+      </table>
+    </section>
+
+    <!-- 關主名單 -->
+    <section class="panel" id="panel-referees">
+      <div class="toolbar">
+        <button class="btn secondary" id="refresh-referees">🔄 重新整理</button>
+      </div>
+      <table>
+        <thead><tr><th>關卡</th><th>LINE 帳號（末 6 碼）</th><th>登記時間</th></tr></thead>
+        <tbody id="referees-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>後台登入｜溪頭大富翁</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #f2f5f0; font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  .card {
+    background: #fff; padding: 32px; border-radius: 12px; width: 320px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  }
+  h1 { font-size: 18px; margin: 0 0 20px; color: #2f4a35; text-align: center; }
+  input {
+    width: 100%; padding: 10px 12px; margin-bottom: 12px; border: 1px solid #ccc;
+    border-radius: 8px; font-size: 15px;
+  }
+  button {
+    width: 100%; padding: 10px; border: none; border-radius: 8px; background: #3a6b45;
+    color: #fff; font-size: 15px; cursor: pointer;
+  }
+  button:hover { background: #2f5638; }
+  .err { color: #c0392b; font-size: 13px; min-height: 18px; margin-bottom: 8px; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🌲 溪頭大富翁後台</h1>
+    <div class="err" id="err"></div>
+    <input type="password" id="password" placeholder="請輸入後台密碼" autofocus />
+    <button id="submit">登入</button>
+  </div>
+  <script>
+    const err = document.getElementById("err");
+    const pwInput = document.getElementById("password");
+
+    async function doLogin() {
+      err.textContent = "";
+      const password = pwInput.value;
+      try {
+        const res = await fetch("/admin/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          err.textContent = data.error || "登入失敗";
+          return;
+        }
+        window.location.href = "/admin/";
+      } catch {
+        err.textContent = "連線失敗，請稍後再試";
+      }
+    }
+
+    document.getElementById("submit").addEventListener("click", doLogin);
+    pwInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doLogin();
+    });
+  </script>
+</body>
+</html>
