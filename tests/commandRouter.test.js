@@ -1,0 +1,416 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+// 必須在 require 任何 src 模組之前設定
+// 跑測試需要一個可連線的 Postgres（本機開發：createdb line_checkpoint_test）
+process.env.DATABASE_URL =
+  process.env.TEST_DATABASE_URL || "postgres://localhost/line_checkpoint_test";
+process.env.PGSSL = "false";
+process.env.PUBLIC_BASE_URL = "https://example.com";
+process.env.ADMIN_USER_IDS = "Uadmin";
+
+const dbModule = require("../src/db");
+const commandRouter = require("../src/handlers/commandRouter");
+const teamService = require("../src/services/teamService");
+const { getRoute } = require("../src/config/teamsRoute");
+const { checkpoints } = require("../src/config/checkpoints");
+
+const ADMIN = "Uadmin";
+
+test.before(async () => {
+  await dbModule.init();
+});
+
+test.after(async () => {
+  await dbModule.pool.end();
+});
+
+async function resetGame() {
+  await commandRouter.route(ADMIN, "重置遊戲 確認");
+}
+
+function textsOf(result) {
+  return (result.reply || []).filter((m) => m.type === "text").map((m) => m.text);
+}
+
+// 模擬「隊伍上傳照片／影片 -> 小編輸入通過 X組」完整流程，回傳隊伍實際收到的過關訊息
+async function passMediaCheckpoint(userId, groupNo) {
+  await teamService.submitMedia(userId);
+  const result = await commandRouter.route(ADMIN, `通過 ${groupNo}組`);
+  assert.equal(result.groupBroadcasts.length, 1);
+  return result.groupBroadcasts[0].messages
+    .filter((m) => m.type === "text")
+    .map((m) => m.text);
+}
+
+test("報到：第一位成為隊長，之後成為組員", async () => {
+  await resetGame();
+  const leaderResult = await commandRouter.route("Uleader", "報到 1組");
+  assert.match(textsOf(leaderResult)[0], /隊長/);
+
+  const memberResult = await commandRouter.route("Umember", "報到 1組");
+  assert.match(textsOf(memberResult)[0], /組員/);
+
+  const leaderMembership = await teamService.findMembership("Uleader");
+  const memberMembership = await teamService.findMembership("Umember");
+  assert.equal(leaderMembership.role, "LEADER");
+  assert.equal(memberMembership.role, "MEMBER");
+});
+
+test("報到：重複報到同組為冪等提示，跨組報到被拒絕", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+
+  const again = await commandRouter.route("Uleader", "報到 1組");
+  assert.match(textsOf(again)[0], /已完成第 1 組報到/);
+
+  const crossGroup = await commandRouter.route("Uleader", "報到 2組");
+  assert.match(textsOf(crossGroup)[0], /先前已綁定為第 1 組/);
+});
+
+test("出發：未報到組別無法出發，成功後廣播第一關", async () => {
+  await resetGame();
+  const noTeam = await commandRouter.route(ADMIN, "出發 9組");
+  assert.match(textsOf(noTeam)[0], /尚未有任何成員報到/);
+
+  await commandRouter.route("Uleader", "報到 1組");
+  const depart = await commandRouter.route(ADMIN, "出發 1組");
+  assert.equal(depart.groupBroadcasts.length, 1);
+  assert.equal(depart.groupBroadcasts[0].groupNo, 1);
+  const broadcastTexts = depart.groupBroadcasts[0].messages
+    .filter((m) => m.type === "text")
+    .map((m) => m.text);
+  assert.ok(broadcastTexts.some((t) => t.includes("出發")));
+  assert.ok(broadcastTexts.some((t) => t.includes("請先移動到")));
+  assert.ok(broadcastTexts.some((t) => t.includes("📍 地點：")));
+  assert.ok(broadcastTexts.some((t) => t.includes("✅ 過關方式：")));
+
+  const again = await commandRouter.route(ADMIN, "出發 1組");
+  assert.match(textsOf(again)[0], /已經出發過了/);
+});
+
+test("關鍵字：答錯提示錯誤、答對晉級、全破後提示前往B6", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  const route = getRoute(1);
+  const firstKeywordIndex = route.findIndex(
+    (s) => checkpoints[s.checkpointId].verifyType === "keyword"
+  );
+  for (let i = 0; i < firstKeywordIndex; i++) {
+    await passMediaCheckpoint("Uleader", 1);
+  }
+  const wrong = await commandRouter.route("Uleader", "亂打的關鍵字");
+  assert.match(textsOf(wrong)[0], /不正確/);
+  for (let i = firstKeywordIndex; i < route.length - 1; i++) {
+    const step = route[i];
+    const cp = checkpoints[step.checkpointId];
+    if (cp.verifyType === "keyword") {
+      const result = await commandRouter.route("Uleader", step.keyword);
+      assert.match(textsOf(result)[0], /✅ 通關/);
+    } else {
+      const msgs = await passMediaCheckpoint("Uleader", 1);
+      assert.match(msgs[0], /✅ 通關/);
+    }
+  }
+  const last = route[route.length - 1];
+  const lastCp = checkpoints[last.checkpointId];
+  let lastReply;
+  if (lastCp.verifyType === "keyword") {
+    lastReply = textsOf(await commandRouter.route("Uleader", last.keyword));
+  } else {
+    lastReply = await passMediaCheckpoint("Uleader", 1);
+  }
+  assert.ok(lastReply.some((t) => t.includes("請儘速前往 B6 辦理終點確認")));
+
+  const team = await teamService.findTeam(1);
+  assert.equal(team.current_index, route.length);
+});
+
+test("照片／影片審核：上傳後不會自動過關，小編通過才解鎖下一關", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+  // 第1組路線第一關是 D5（無關主，photo）
+
+  const submit = await teamService.submitMedia("Uleader");
+  assert.match(textsOf({ reply: submit.reply })[0], /請等待小編確認/);
+  assert.equal(submit.adminNotify.length, 1);
+  assert.equal(submit.adminNotify[0].to, ADMIN);
+  assert.match(submit.adminNotify[0].messages[0].text, /上傳了照片/);
+
+  // 還沒被小編通過，關卡進度不應前進
+  const teamBefore = await teamService.findTeam(1);
+  assert.equal(teamBefore.current_index, 0);
+
+  // 非小編不能通過審核
+  const deniedApprove = await commandRouter.route("Uleader", "通過 1組");
+  assert.match(textsOf(deniedApprove)[0], /僅限小編使用/);
+
+  const approve = await commandRouter.route(ADMIN, "通過 1組");
+  assert.match(textsOf(approve)[0], /已為第 1 組確認/);
+  assert.equal(approve.groupBroadcasts.length, 1);
+  const teamMsgs = approve.groupBroadcasts[0].messages
+    .filter((m) => m.type === "text")
+    .map((m) => m.text);
+  assert.ok(teamMsgs.some((t) => t.includes("✅ 通關")));
+
+  const teamAfter = await teamService.findTeam(1);
+  assert.equal(teamAfter.current_index, 1);
+});
+
+test("關卡型態不符：關主關卡上傳照片、無關主關卡輸入文字，都會提示正確方式", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+  // 第1組路線第一關是 D5（無關主，photo）
+  const wrongMode1 = await commandRouter.route("Uleader", "隨便打字");
+  assert.match(textsOf(wrongMode1)[0], /直接上傳/);
+
+  // 走到下一個關主(keyword)關卡前
+  const route = getRoute(1);
+  const keywordIndex = route.findIndex(
+    (s) => checkpoints[s.checkpointId].verifyType === "keyword"
+  );
+  for (let i = 0; i < keywordIndex; i++) {
+    await passMediaCheckpoint("Uleader", 1);
+  }
+  const mediaOnKeyword = await teamService.submitMedia("Uleader");
+  assert.match(textsOf({ reply: mediaOnKeyword.reply })[0], /需要向關主取得關鍵字/);
+  assert.equal(mediaOnKeyword.adminNotify.length, 0);
+});
+
+test("通過指令不限關卡類型：小編也可以對關主關卡直接喊過，當作手動捷徑", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  // 走到第一個關主(keyword)關卡
+  const route = getRoute(1);
+  const keywordIndex = route.findIndex(
+    (s) => checkpoints[s.checkpointId].verifyType === "keyword"
+  );
+  for (let i = 0; i < keywordIndex; i++) {
+    await passMediaCheckpoint("Uleader", 1);
+  }
+
+  const approveOnKeyword = await commandRouter.route(ADMIN, "通過 1組");
+  assert.match(textsOf(approveOnKeyword)[0], /已為第 1 組確認/);
+  assert.equal(approveOnKeyword.groupBroadcasts.length, 1);
+
+  const team = await teamService.findTeam(1);
+  assert.equal(team.current_index, keywordIndex + 1);
+});
+
+test("到站：B6工作人員觸發終點確認，完賽指令改為提示訊息", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route("Umember", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  const oldFinish = await commandRouter.route("Uleader", "完賽");
+  assert.match(textsOf(oldFinish)[0], /終點確認」制/);
+
+  const arrive = await commandRouter.route("Ub6staff", "到站 1組");
+  assert.match(textsOf(arrive)[0], /已為第 1 組辦理終點確認/);
+  assert.equal(arrive.groupBroadcasts.length, 1);
+  const teamMsgs = arrive.groupBroadcasts[0].messages
+    .filter((m) => m.type === "text")
+    .map((m) => m.text);
+  assert.ok(teamMsgs.some((t) => t.includes("🏁 終點確認成功")));
+
+  const team = await teamService.findTeam(1);
+  assert.equal(team.status, "FINISHED");
+
+  // 已終點確認後，關卡訊息不再有回應
+  const strayText = await commandRouter.route("Uleader", "隨便打的字");
+  assert.equal(strayText.reply, null);
+});
+
+test("到站：尚未出發或尚未報到都會被拒絕，重複到站為冪等", async () => {
+  await resetGame();
+  const noTeam = await commandRouter.route(ADMIN, "到站 8組");
+  assert.match(textsOf(noTeam)[0], /尚未有任何成員報到/);
+
+  await commandRouter.route("Uleader", "報到 8組");
+  const notDeparted = await commandRouter.route(ADMIN, "到站 8組");
+  assert.match(textsOf(notDeparted)[0], /尚未出發/);
+
+  await commandRouter.route(ADMIN, "出發 8組");
+  await commandRouter.route(ADMIN, "到站 8組");
+  const again = await commandRouter.route(ADMIN, "到站 8組");
+  assert.match(textsOf(again)[0], /已經辦理過終點確認/);
+});
+
+test("管理指令：非小編一律被拒絕", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+
+  const denied = await Promise.all([
+    commandRouter.route("Uleader", "進度"),
+    commandRouter.route("Uleader", "遊戲結束"),
+    commandRouter.route("Uleader", "排行榜開啟"),
+    commandRouter.route("Uleader", "解除綁定 1組"),
+    commandRouter.route("Uleader", "確認換隊長 1組"),
+    commandRouter.route("Uleader", "重置遊戲"),
+  ]);
+  for (const r of denied) {
+    assert.match(textsOf(r)[0], /僅限小編使用/);
+  }
+});
+
+test("遊戲結束：只凍結關卡進度，不會產生終點確認，之後仍可到站", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  const result = await commandRouter.route(ADMIN, "遊戲結束");
+  assert.match(textsOf(result)[0], /已停止受理新的關卡進度/);
+  assert.equal(result.groupBroadcasts.length, 1);
+
+  // 凍結後嘗試過關會被拒絕
+  const route = getRoute(1);
+  const firstKeywordStep = route.find(
+    (s) => checkpoints[s.checkpointId].verifyType === "keyword"
+  );
+  const frozenAttempt = await commandRouter.route("Uleader", firstKeywordStep.keyword);
+  assert.match(textsOf(frozenAttempt)[0], /已停止受理新的關卡進度/);
+
+  // 到站仍然有效
+  const arrive = await commandRouter.route(ADMIN, "到站 1組");
+  assert.match(textsOf(arrive)[0], /已為第 1 組辦理終點確認/);
+
+  const again = await commandRouter.route(ADMIN, "遊戲結束");
+  assert.match(textsOf(again)[0], /已經是停止受理新關卡進度的狀態了/);
+});
+
+test("換隊長：組員申請、小編核准後角色互換", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route("Umember", "報到 1組");
+
+  const requestResult = await commandRouter.route("Umember", "接任隊長 1組");
+  assert.match(textsOf(requestResult)[0], /已送出接任隊長申請/);
+  assert.equal(requestResult.directPushes.length, 1);
+  assert.equal(requestResult.directPushes[0].to, ADMIN);
+
+  const confirmResult = await commandRouter.route(ADMIN, "確認換隊長 1組");
+  assert.match(textsOf(confirmResult)[0], /更換完成/);
+
+  assert.equal((await teamService.findMembership("Umember")).role, "LEADER");
+  assert.equal((await teamService.findMembership("Uleader")).role, "MEMBER");
+});
+
+test("解除綁定：清空後可重新報到", async () => {
+  await resetGame();
+  await commandRouter.route("Uwrong", "報到 3組");
+  assert.ok(await teamService.findMembership("Uwrong"));
+
+  await commandRouter.route(ADMIN, "解除綁定 3組");
+  assert.equal(await teamService.findMembership("Uwrong"), undefined);
+  assert.equal(await teamService.findTeam(3), undefined);
+
+  const rebind = await commandRouter.route("Uwrong", "報到 5組");
+  assert.match(textsOf(rebind)[0], /第 5 組隊長/);
+});
+
+test("排行榜：預設不公開，開啟後任何人可查詢；準時到站排在未歸隊前面", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader1", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+  await commandRouter.route(ADMIN, "到站 1組");
+
+  await commandRouter.route("Uleader2", "報到 2組");
+  await commandRouter.route(ADMIN, "出發 2組");
+
+  const closed = await commandRouter.route("Uleader1", "排行榜");
+  assert.match(textsOf(closed)[0], /僅開放小編查詢/);
+
+  await commandRouter.route(ADMIN, "排行榜開啟");
+  const open = await commandRouter.route("Uleader1", "排行榜");
+  const text = textsOf(open)[0];
+  assert.match(text, /排行榜/);
+  assert.doesNotMatch(text, /僅開放小編查詢/);
+  assert.ok(text.indexOf("1組") < text.indexOf("2組"), "已到站的1組應排在未歸隊的2組前面");
+});
+
+test("重置遊戲：需兩步驟確認", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+
+  const warn = await commandRouter.route(ADMIN, "重置遊戲");
+  assert.match(textsOf(warn)[0], /請輸入「重置遊戲 確認」/);
+  assert.ok(await teamService.findMembership("Uleader"));
+
+  await commandRouter.route(ADMIN, "重置遊戲 確認");
+  assert.equal(await teamService.findMembership("Uleader"), undefined);
+});
+
+test("報到：不存在的組別編號會被拒絕，不會建立幽靈隊伍", async () => {
+  await resetGame();
+  const result = await commandRouter.route("Uleader", "報到 99組");
+  assert.match(textsOf(result)[0], /第 99 組不存在/);
+  assert.equal(await teamService.findMembership("Uleader"), undefined);
+  assert.equal(await teamService.findTeam(99), undefined);
+
+  // 確保沒有殘留的幽靈隊伍讓「出發」之類的指令壞掉
+  const depart = await commandRouter.route(ADMIN, "出發 99組");
+  assert.match(textsOf(depart)[0], /尚未有任何成員報到/);
+});
+
+test("凍結進度後，「通過」也不能再讓關卡前進（跟關鍵字比對一致）", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+  await commandRouter.route(ADMIN, "遊戲結束");
+
+  await teamService.submitMedia("Uleader"); // 第1組第一關 D5 是 photo
+  const approveAfterFreeze = await commandRouter.route(ADMIN, "通過 1組");
+  assert.match(textsOf(approveAfterFreeze)[0], /已停止受理新的關卡進度/);
+
+  const team = await teamService.findTeam(1);
+  assert.equal(team.current_index, 0);
+});
+
+test("退回：小編手滑連按兩次「通過」造成跳關，可以用「退回」更正", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  // 模擬手滑連按兩次「通過」，跳過了本來該做的第二關任務
+  await commandRouter.route(ADMIN, "通過 1組");
+  await commandRouter.route(ADMIN, "通過 1組");
+  let team = await teamService.findTeam(1);
+  assert.equal(team.current_index, 2);
+
+  const revert = await commandRouter.route(ADMIN, "退回 1組");
+  assert.match(textsOf(revert)[0], /已將第 1 組退回到/);
+  assert.equal(revert.groupBroadcasts.length, 1);
+  assert.match(revert.groupBroadcasts[0].messages[0].text, /重新視為未完成/);
+
+  team = await teamService.findTeam(1);
+  assert.equal(team.current_index, 1, "退回後應該回到只完成一關");
+
+  // 沒有進度可退回時的提示
+  await commandRouter.route(ADMIN, "退回 1組");
+  const noMore = await commandRouter.route(ADMIN, "退回 1組");
+  assert.match(textsOf(noMore)[0], /沒有可以退回的關卡進度/);
+});
+
+test("退回：也可以取消誤觸的終點確認，讓該組恢復闖關中繼續計時", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+  await commandRouter.route(ADMIN, "到站 1組");
+
+  let team = await teamService.findTeam(1);
+  assert.equal(team.status, "FINISHED");
+
+  const revert = await commandRouter.route(ADMIN, "退回 1組");
+  assert.match(textsOf(revert)[0], /已取消第 1 組的終點確認/);
+
+  team = await teamService.findTeam(1);
+  assert.equal(team.status, "IN_PROGRESS");
+  assert.equal(team.finish_time, null);
+});

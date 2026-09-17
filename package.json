@@ -1,0 +1,26 @@
+{
+  "name": "line-checkpoint-system",
+  "version": "1.0.0",
+  "description": "國介＆禾康溪頭大富翁 LINE 闖關系統｜官方帳號後端",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test",
+    "routes:export": "node scripts/routes-export-csv.js",
+    "routes:import": "node scripts/routes-import-csv.js",
+    "checkpoints:export": "node scripts/checkpoints-export-csv.js",
+    "checkpoints:import": "node scripts/checkpoints-import-csv.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^11.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "node-cron": "^4.6.0",
+    "pg": "^8.23.0"
+  }
+}

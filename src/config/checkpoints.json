@@ -1,0 +1,122 @@
+[
+  {
+    "id": "A2",
+    "name": "我是大學生",
+    "location": "J 大學池前側",
+    "content": "拍下全組團體照，背景須同時入鏡大學池及拱橋。",
+    "scoringMethod": "請將照片直接上傳到本對話，小編確認後會解鎖下一關。",
+    "hasMap": true,
+    "mapFile": "A2.jpg",
+    "verifyType": "photo"
+  },
+  {
+    "id": "B3",
+    "name": "救救菜英文",
+    "location": "J 大學池後側花園",
+    "content": "由關主提供 5 個英文單字，完成五個該字母為首的英文單字（含拼音）即可過關。",
+    "scoringMethod": "由關主評估完成後告知通關關鍵字，請將關鍵字輸入本對話。",
+    "hasMap": true,
+    "mapFile": "B3.jpg",
+    "verifyType": "keyword"
+  },
+  {
+    "id": "C4",
+    "name": "瘋狂驗光師",
+    "location": "秋海棠標本園",
+    "content": "由關主提供有顏色的圖卡，圖卡上的字與圖卡顏色不同，依照關主指示說出答案。",
+    "scoringMethod": "正確後由關主告知通關關鍵字，請將關鍵字輸入本對話。",
+    "hasMap": true,
+    "mapFile": "C4.jpg",
+    "verifyType": "keyword"
+  },
+  {
+    "id": "A5",
+    "name": "星空之門",
+    "location": "第二售票處旁溪頭廣場尾端",
+    "content": "全體牽手圍成單圓、手不脫落，由主持人指定任兩位同學分別拿呼拉圈的左右兩側，全隊由呼拉圈中間穿越。",
+    "scoringMethod": "於指定時間內完成後由關主告知通關關鍵字，請將關鍵字輸入本對話。",
+    "hasMap": true,
+    "mapFile": "A5.jpg",
+    "verifyType": "keyword"
+  },
+  {
+    "id": "A3",
+    "name": "金氏遊戲",
+    "location": "第二售票處旁溪頭廣場首端",
+    "content": "60 秒記憶所指定之物品，於時間內寫出正確名稱且寫最多者獲勝。",
+    "scoringMethod": "完成後由關主告知通關關鍵字，請將關鍵字輸入本對話。",
+    "hasMap": true,
+    "mapFile": "A3.jpg",
+    "verifyType": "keyword"
+  },
+  {
+    "id": "B4",
+    "name": "百步穿揚",
+    "location": "星光教室（N 溪頭飯店旁）",
+    "content": "全體利用腳上的鞋子，依序丟進指定的區域範圍內。",
+    "scoringMethod": "由關主評估完成後告知通關關鍵字，請將關鍵字輸入本對話。",
+    "hasMap": true,
+    "mapFile": "B4.jpg",
+    "verifyType": "keyword"
+  },
+  {
+    "id": "D6",
+    "name": "節奏遊戲",
+    "location": "漢光樓旁草地",
+    "content": "跟著指示影片唸完提示，並由攝影師錄影，唸到第六頁即可過關。背景須有步道入鏡。",
+    "scoringMethod": "由關主確認後告知通關關鍵字，請將關鍵字輸入本對話。",
+    "hasMap": true,
+    "mapFile": "D6.jpg",
+    "verifyType": "keyword"
+  },
+  {
+    "id": "E3",
+    "name": "天旋地轉",
+    "location": "探索森林區",
+    "content": "同一組四位完成即可過關：將裝水的寶特瓶上丟後站立即可過關（請自備礦泉水）。此關無現場關主。",
+    "scoringMethod": "請將完成過程錄影後直接上傳到本對話，小編確認後會解鎖下一關。",
+    "hasMap": true,
+    "mapFile": "E3.jpg",
+    "verifyType": "video"
+  },
+  {
+    "id": "B6",
+    "name": "勝利之堡",
+    "location": "H 青年活動中心石板廣場出發區",
+    "content": "到主視覺前拍照。",
+    "scoringMethod": "請將照片直接上傳到本對話，小編確認後會解鎖下一關。",
+    "hasMap": true,
+    "mapFile": "B6.jpg",
+    "verifyType": "photo"
+  },
+  {
+    "id": "D5",
+    "name": "我是好員工",
+    "location": "地點不限，安全無虞範圍下就地拍攝即可",
+    "content": "用人體排列成「國介」或「禾康」的 LOGO 字形並拍照。",
+    "scoringMethod": "請將照片直接上傳到本對話，小編確認後會解鎖下一關。",
+    "hasMap": false,
+    "mapFile": null,
+    "verifyType": "photo"
+  },
+  {
+    "id": "C5",
+    "name": "消防安檢員",
+    "location": "地點不限，安全無虞範圍下就地拍攝即可",
+    "content": "於附近找到 3 組消防栓或滅火器拍照上傳，需至少半組人數入鏡。",
+    "scoringMethod": "請將照片直接上傳到本對話，小編確認後會解鎖下一關。",
+    "hasMap": false,
+    "mapFile": null,
+    "verifyType": "photo"
+  },
+  {
+    "id": "E2",
+    "name": "愛心小站",
+    "location": "地點不限，安全無虞範圍下就地拍攝即可",
+    "content": "全體人員錄影並一起說出「我愛國介」或「我愛禾康」，並擺出可愛動作即可過關。",
+    "scoringMethod": "請將影片直接上傳到本對話，小編確認後會解鎖下一關。",
+    "hasMap": false,
+    "mapFile": null,
+    "verifyType": "video"
+  }
+]

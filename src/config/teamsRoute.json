@@ -1,0 +1,532 @@
+[
+  {
+    "groupNo": 1,
+    "route": [
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 2,
+    "route": [
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 3,
+    "route": [
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 4,
+    "route": [
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 5,
+    "route": [
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 6,
+    "route": [
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 7,
+    "route": [
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 8,
+    "route": [
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 9,
+    "route": [
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      }
+    ]
+  },
+  {
+    "groupNo": 10,
+    "route": [
+      {
+        "checkpointId": "B6",
+        "keyword": null
+      },
+      {
+        "checkpointId": "D5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E3",
+        "keyword": null
+      },
+      {
+        "checkpointId": "C5",
+        "keyword": null
+      },
+      {
+        "checkpointId": "A2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "E2",
+        "keyword": null
+      },
+      {
+        "checkpointId": "C4",
+        "keyword": "C4"
+      },
+      {
+        "checkpointId": "A5",
+        "keyword": "A5"
+      },
+      {
+        "checkpointId": "A3",
+        "keyword": "A3"
+      },
+      {
+        "checkpointId": "D6",
+        "keyword": "D6"
+      },
+      {
+        "checkpointId": "B4",
+        "keyword": "B4"
+      },
+      {
+        "checkpointId": "B3",
+        "keyword": "B3"
+      }
+    ]
+  }
+]
