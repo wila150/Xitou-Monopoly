@@ -1,6 +1,6 @@
 // 把 data/checkpoints.csv 匯入回 src/config/checkpoints.json。
-// 只允許編輯既有 12 關的 name／location／content／scoringMethod／hasMap／mapFile，不允許新增或刪除關卡代號
-// （關卡代號變動牽涉到 teamsRoute.json 與地圖圖片，請直接改 checkpoints.json 並同步調整其他地方）。
+// 只允許編輯既有 12 關的 name／location／content／scoringMethod／mapFiles，不允許新增或刪除關卡代號
+// （關卡代號變動牽涉到 teamsRoute.json，請直接改 checkpoints.json 並同步調整其他地方）。
 const fs = require("fs");
 const path = require("path");
 const { parseCsvAsObjects } = require("./csvUtil");
@@ -31,21 +31,25 @@ const updated = rows.map((row, i) => {
   }
   seenIds.add(id);
 
-  const hasMap = String(row.hasMap).trim().toUpperCase() === "TRUE";
   const verifyType = (row.verifyType || "").trim();
   if (!["keyword", "photo", "video"].includes(verifyType)) {
     errors.push(
       `第 ${lineNo} 列：verifyType「${row.verifyType}」不合法，必須是 keyword／photo／video 其中之一`
     );
   }
+
+  const mapFiles = (row.mapFiles || "")
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   return {
     id,
     name: row.name || "",
     location: row.location || "",
     content: row.content || "",
     scoringMethod: row.scoringMethod || "",
-    hasMap,
-    mapFile: hasMap ? row.mapFile || `${id}.jpg` : null,
+    mapFiles,
     verifyType,
   };
 });

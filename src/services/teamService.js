@@ -30,7 +30,9 @@ function checkpointAnnouncement(checkpointId, { isFirst = false } = {}) {
     `🎮 玩法：${cp.content}\n` +
     `✅ 過關方式：${cp.scoringMethod}`;
   const messages = [textMsg(body)];
-  if (cp.hasMap) messages.push(imageMsg(cp.mapFile));
+  for (const mapFile of cp.mapFiles || []) {
+    messages.push(imageMsg(mapFile));
+  }
   return messages;
 }
 
