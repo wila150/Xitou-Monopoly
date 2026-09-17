@@ -380,7 +380,7 @@ async function finishAtB6(groupNo) {
     }
 
     const ts = nowIso();
-    const late = isLate(ts) ? 1 : 0;
+    const late = isLate(team.start_time, ts) ? 1 : 0;
     await tx.run(
       `UPDATE teams SET status = 'FINISHED', finish_time = ?, is_late = ? WHERE group_no = ?`,
       [ts, late, groupNo]
@@ -393,7 +393,9 @@ async function finishAtB6(groupNo) {
       ),
     ];
     if (late) {
-      teamMessages.push(textMsg("⚠️ 已超過 12:30，將標註為「逾時」。"));
+      teamMessages.push(
+        textMsg(`⚠️ 出發後已超過 ${event.maxDurationMinutes / 60} 小時，將標註為「逾時」。`)
+      );
     }
 
     return {

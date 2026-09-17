@@ -23,15 +23,12 @@ function elapsedSeconds(startIso, endIso) {
   return Math.max(0, Math.floor((endMs - startMs) / 1000));
 }
 
-// 今天的 12:30（建議回報上限／自動結算時間點）
-function getCutoffTimestamp(reference = new Date()) {
-  const d = new Date(reference);
-  d.setHours(event.cutoffHour, event.cutoffMinute, 0, 0);
-  return d.toISOString();
+// 準時／逾時：看該組「出發」到「終點確認」經過多久，不是比對固定時刻，
+// 超過 event.maxDurationMinutes（預設 2 小時）就算逾時
+function isLate(startIso, finishIso) {
+  if (!startIso) return false;
+  const elapsedMs = new Date(finishIso).getTime() - new Date(startIso).getTime();
+  return elapsedMs > event.maxDurationMinutes * 60 * 1000;
 }
 
-function isLate(finishIso, reference = new Date()) {
-  return new Date(finishIso).getTime() > new Date(getCutoffTimestamp(reference)).getTime();
-}
-
-module.exports = { nowIso, formatElapsed, elapsedSeconds, getCutoffTimestamp, isLate };
+module.exports = { nowIso, formatElapsed, elapsedSeconds, isLate };

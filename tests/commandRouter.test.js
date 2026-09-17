@@ -414,3 +414,28 @@ test("退回：也可以取消誤觸的終點確認，讓該組恢復闖關中�
   assert.equal(team.status, "IN_PROGRESS");
   assert.equal(team.finish_time, null);
 });
+
+test("逾時判斷是看「出發後經過多久」，不是比對當天固定時刻", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  // 立刻到站：不管現在實際時間是幾點，都應該算準時（出發到到站沒幾毫秒）
+  const arrive = await commandRouter.route(ADMIN, "到站 1組");
+  const teamMsgs = arrive.groupBroadcasts[0].messages.map((m) => m.text).join("");
+  assert.doesNotMatch(teamMsgs, /逾時/);
+  assert.equal((await teamService.findTeam(1)).is_late, 0);
+
+  // 模擬「出發後已經過了 3 小時」：直接把 start_time 往前調，驗證超過 2 小時會被標記逾時
+  await commandRouter.route("Uleader2", "報到 2組");
+  await commandRouter.route(ADMIN, "出發 2組");
+  const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  await dbModule.db.run("UPDATE teams SET start_time = ? WHERE group_no = ?", [
+    threeHoursAgo,
+    2,
+  ]);
+  const lateArrive = await commandRouter.route(ADMIN, "到站 2組");
+  const lateTeamMsgs = lateArrive.groupBroadcasts[0].messages.map((m) => m.text).join("");
+  assert.match(lateTeamMsgs, /逾時/);
+  assert.equal((await teamService.findTeam(2)).is_late, 1);
+});
