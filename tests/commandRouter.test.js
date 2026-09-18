@@ -1403,3 +1403,55 @@ test("小編指定關主：貼完整 userId 就算不在名單裡也能綁定（
   assert.match(textsOf(await commandRouter.route(ADMIN, `指定關主 B3 ${oldUserId}`))[0], /已經是第 1 組的成員/);
   await dbModule.db.run("DELETE FROM line_users");
 });
+
+test("推播：等待對象時又打完整指令不會被吃掉；冒號（全形／半形）與逗號都能當分隔；等待時可一次打「對象 內容」", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route("Ureferee", "我是 B3 關主");
+  const sent = (r) => textsOf(r)[0];
+  // 推出去的訊息格式是「📢 總領隊訊息\n內容」，取第二行之後當內容，確認冒號與對象沒有混進內容
+  const body = (r) => r.directPushes[0].messages[0].text.replace(/^📢 總領隊訊息\n/, "");
+
+  // 重現回報的情境：先單獨打「群發」進入等待對象，再打完整的「群發 ：隊長 測試123」
+  assert.match(sent(await commandRouter.route(ADMIN, "群發")), /請輸入推播對象/);
+  const full = await commandRouter.route(ADMIN, "群發 ：隊長 測試123");
+  assert.match(sent(full), /已推播給 1 位小隊長/);
+  assert.equal(full.directPushes[0].to, "Uleader");
+  assert.equal(body(full), "測試123", "內容不含冒號與對象");
+  // 等待狀態已被清掉：下一則一般文字不會被當成對象
+  assert.doesNotMatch(sent(await commandRouter.route(ADMIN, "隨便打的字")), /看不懂這個對象/);
+
+  // 各種分隔寫法
+  for (const text of ["群發：隊長 內容A", "群發:隊長 內容A", "推播 ：隊長：內容A", "推播:隊長,內容A", "群發 隊長，內容A"]) {
+    const r = await commandRouter.route(ADMIN, text);
+    assert.match(sent(r), /已推播給 1 位小隊長/, text);
+    assert.equal(body(r), "內容A", `${text} 的內容`);
+  }
+  assert.match(sent(await commandRouter.route(ADMIN, "群發：所有人：午餐開始")), /已推播給所有人/);
+  assert.match(sent(await commandRouter.route(ADMIN, "推播：關主 請注意天氣")), /已推播給 1 位關主/);
+
+  // 只打「群發：」（沒有內容）＝進入等待對象；「群發 隊長：」＝指定對象、等待內容
+  assert.match(sent(await commandRouter.route(ADMIN, "群發：")), /請輸入推播對象/);
+  assert.match(sent(await commandRouter.route(ADMIN, "群發 關主：")), /請輸入要推播給「關主」的訊息內容/);
+  assert.match(sent(await commandRouter.route(ADMIN, "取消")), /已取消推播/);
+
+  // 等待對象時，直接打「對象 內容」也行（不用再分兩則）
+  await commandRouter.route(ADMIN, "推播");
+  const oneShot = await commandRouter.route(ADMIN, "隊長：明天九點集合");
+  assert.match(sent(oneShot), /已推播給 1 位小隊長/);
+  assert.equal(body(oneShot), "明天九點集合");
+
+  // 等待內容時又打完整指令：重新開始，不會把整句當成內容送出去
+  await commandRouter.route(ADMIN, "推播 隊長");
+  const restart = await commandRouter.route(ADMIN, "群發 關主 新的內容");
+  assert.match(sent(restart), /已推播給 1 位關主/);
+  assert.equal(body(restart), "新的內容");
+
+  // 真的看不懂的對象還是會提示（並附一行打完的寫法）
+  await commandRouter.route(ADMIN, "推播");
+  assert.match(sent(await commandRouter.route(ADMIN, "亂打")), /看不懂這個對象[\s\S]*一次完成/);
+  await commandRouter.route(ADMIN, "取消");
+
+  // 沒有權限的人打帶冒號的寫法一樣被擋
+  assert.match(sent(await commandRouter.route("Uleader", "群發：隊長 測試")), /僅限小編或登記過的總領隊/);
+});

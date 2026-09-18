@@ -48,7 +48,8 @@ const REFEREE_ENTRY_RE = /^(?:關主\s*(?:報到|綁定)|(?:報到|綁定)\s*關
 const BROADCASTER_ENTRY_RE = /^(?:總領隊?\s*(?:報到|綁定)|(?:報到|綁定)\s*總領隊?)$/;
 // 推播（總領隊／小編）：「推播」「推播 隊長」「推播 隊長 訊息內容」，「群發」是同義詞；
 // 對象可以省略（省略就是推給隊長，等同舊版「群發 訊息內容」），也可以分兩步：先指定對象，下一則訊息才是內容。
-const BROADCAST_RE = /^(?:推播|群發)(?:\s+([\s\S]+))?$/;
+// 「推播」「群發」後面的分隔可以是空白、半形／全形冒號（例如「群發：隊長 內容」「群發 ：隊長 內容」），都算數
+const BROADCAST_RE = /^(?:推播|群發)(?:[\s:：]+([\s\S]*))?$/;
 const BROADCAST_TARGET_ALIASES = {
   隊長: "leader",
   小隊長: "leader",
@@ -58,8 +59,9 @@ const BROADCAST_TARGET_ALIASES = {
   全體: "all",
 };
 const BROADCAST_TARGET_PATTERN = Object.keys(BROADCAST_TARGET_ALIASES).join("|");
-const BROADCAST_TARGET_ONLY_RE = new RegExp(`^(${BROADCAST_TARGET_PATTERN})$`);
-const BROADCAST_TARGET_WITH_CONTENT_RE = new RegExp(`^(${BROADCAST_TARGET_PATTERN})\\s+([\\s\\S]+)$`);
+// 對象後面可以接空白、冒號或逗號再接內容：「隊長 內容」「隊長：內容」「隊長，內容」
+const BROADCAST_TARGET_ONLY_RE = new RegExp(`^(${BROADCAST_TARGET_PATTERN})[:：]?$`);
+const BROADCAST_TARGET_WITH_CONTENT_RE = new RegExp(`^(${BROADCAST_TARGET_PATTERN})[\\s:：，,]+([\\s\\S]+)$`);
 const PENDING_BROADCAST_TTL_MS = 3 * 60 * 1000;
 // 緊急聯絡：「緊急聯絡」「緊急求助」，後面可接說明（有沒有空白或冒號都行），任何人都能用
 const EMERGENCY_RE = /^(?:緊急聯絡|緊急求助)(?:[\s:：]+([\s\S]+))?$/;
@@ -170,10 +172,19 @@ async function handlePendingBroadcast(userId, text, pending) {
     return withReply([teamService.textMsg("已取消推播。")]);
   }
   if (pending.stage === "target") {
-    const key = BROADCAST_TARGET_ALIASES[text];
+    // 這一步也可以一次打完「隊長 內容」（對象＋內容），不用再分兩則
+    const withContent = text.match(BROADCAST_TARGET_WITH_CONTENT_RE);
+    if (withContent) {
+      pendingBroadcasts.delete(userId);
+      return sendBroadcast(userId, BROADCAST_TARGET_ALIASES[withContent[1]], withContent[2]);
+    }
+    const targetOnly = text.match(BROADCAST_TARGET_ONLY_RE);
+    const key = targetOnly && BROADCAST_TARGET_ALIASES[targetOnly[1]];
     if (!key) {
       return withReply([
-        teamService.textMsg("⚠️ 看不懂這個對象，請輸入：隊長、關主、所有人（或輸入「取消」放棄）。"),
+        teamService.textMsg(
+          "⚠️ 看不懂這個對象，請輸入：隊長、關主、所有人（或輸入「取消」放棄）。\n也可以直接打「推播 隊長 訊息內容」一次完成。"
+        ),
       ]);
     }
     pendingBroadcasts.set(userId, {
@@ -205,7 +216,8 @@ async function route(userId, rawText) {
 
   const pending = pendingBroadcasts.get(userId);
   if (pending) {
-    if (pending.expiresAt > Date.now()) {
+    // 等待中又打了完整的「推播／群發 …」指令：視為重新開始，不要把它當成對象或內容吃掉
+    if (pending.expiresAt > Date.now() && !BROADCAST_RE.test(text)) {
       return handlePendingBroadcast(userId, text, pending);
     }
     pendingBroadcasts.delete(userId);
@@ -273,7 +285,7 @@ async function route(userId, rawText) {
   if ((m = text.match(BROADCAST_RE))) {
     // 小編或登記過的總領隊：對隊長／關主／所有人推播文字訊息
     if (!(await canBroadcast(userId))) return broadcastOnlyDenied();
-    const rest = m[1];
+    const rest = (m[1] || "").trim();
     if (!rest) {
       pendingBroadcasts.set(userId, {
         stage: "target",
