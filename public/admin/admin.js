@@ -39,6 +39,7 @@ function switchTab(tab) {
   document.getElementById(`panel-${tab}`).classList.add("active");
   if (tab === "progress") { loadProgress(); loadBroadcastScope(); }
   if (tab === "referees") loadReferees();
+  if (tab === "line-users") loadLineUsers();
   if (tab === "leaders") loadTeamLeaders();
   if (tab === "broadcasters") loadBroadcasters();
   if (tab === "emergencies") loadEmergencies();
@@ -494,6 +495,95 @@ document.getElementById("broadcast-scope").addEventListener("change", async (e) 
     showMsg(progressMsg, "已更新關卡公告推播對象。", false);
   } catch (err) {
     showMsg(progressMsg, err.message, true);
+  }
+});
+
+// ---- LINE 使用者（查 userId）----
+let lineUsersCache = [];
+let lineUsersShown = [];
+const lineUsersMsg = document.getElementById("line-users-msg");
+
+// 名字比對忽略空白與大小寫（「芊  芊」= 「芊芊」）
+const normalizeName = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
+
+function renderLineUsers() {
+  const terms = document
+    .getElementById("line-users-q")
+    .value.split(/[\n,，、;；]+/)
+    .map(normalizeName)
+    .filter(Boolean);
+  const matches = (u, t) => normalizeName(u.displayName).includes(t) || u.userId.toLowerCase().includes(t);
+  lineUsersShown = terms.length ? lineUsersCache.filter((u) => terms.some((t) => matches(u, t))) : lineUsersCache;
+  const missing = terms.length > 1 ? terms.filter((t) => !lineUsersCache.some((u) => matches(u, t))) : [];
+  document.getElementById("line-users-missing").textContent = missing.length
+    ? `找不到：${missing.join("、")}（對方需要先傳過一句話給官方帳號）`
+    : terms.length === 1 && lineUsersShown.length === 0
+      ? "找不到符合的人（對方需要先傳過一句話給官方帳號）"
+      : "";
+  document.getElementById("line-users-body").innerHTML =
+    lineUsersShown
+      .map((u) => {
+        const badges = [
+          u.teamLabel,
+          u.refereeCheckpointId ? `${u.refereeCheckpointId} 關主` : null,
+          u.isBroadcaster ? "總領隊" : null,
+          u.isAdmin ? "小編" : null,
+        ].filter(Boolean);
+        return `<tr>
+          <td>${escapeHtml(u.displayName || "（未取得名稱）")}</td>
+          <td style="font-family:monospace;font-size:12px;word-break:break-all;">${escapeHtml(u.userId)}</td>
+          <td>${escapeHtml(badges.join("、") || "-")}</td>
+          <td>${u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString("zh-TW") : "-"}</td>
+          <td><button class="btn secondary copy-user-id" data-user="${escapeHtml(u.userId)}">複製 ID</button></td>
+        </tr>`;
+      })
+      .join("") || `<tr><td colspan="5" style="color:#888;">沒有符合的人</td></tr>`;
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // 非 https 或瀏覽器不允許時的備援
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (!ok) throw new Error("瀏覽器不允許複製，請手動選取文字");
+  }
+}
+
+async function loadLineUsers() {
+  try {
+    lineUsersCache = await api("/api/line-users");
+    renderLineUsers();
+  } catch (err) {
+    showMsg(lineUsersMsg, err.message, true);
+  }
+}
+document.getElementById("line-users-q").addEventListener("input", renderLineUsers);
+document.getElementById("refresh-line-users").addEventListener("click", loadLineUsers);
+document.getElementById("line-users-body").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".copy-user-id");
+  if (!btn) return;
+  try {
+    await copyText(btn.dataset.user);
+    showMsg(lineUsersMsg, "已複製 userId。", false);
+  } catch (err) {
+    showMsg(lineUsersMsg, err.message, true);
+  }
+});
+document.getElementById("copy-line-users").addEventListener("click", async () => {
+  if (lineUsersShown.length === 0) return showMsg(lineUsersMsg, "目前沒有可複製的結果。", true);
+  try {
+    await copyText(lineUsersShown.map((u) => `${u.displayName || "（未取得名稱）"}\t${u.userId}`).join("\n"));
+    showMsg(lineUsersMsg, `已複製 ${lineUsersShown.length} 位（名稱與 userId，用 Tab 分隔，可直接貼到試算表）。`, false);
+  } catch (err) {
+    showMsg(lineUsersMsg, err.message, true);
   }
 });
 

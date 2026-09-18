@@ -17,6 +17,7 @@
     <button class="tab-btn" data-tab="routes">組別路線</button>
     <button class="tab-btn" data-tab="progress">即時進度</button>
     <button class="tab-btn" data-tab="referees">關主名單</button>
+    <button class="tab-btn" data-tab="line-users">LINE 使用者</button>
     <button class="tab-btn" data-tab="leaders">小隊長名單</button>
     <button class="tab-btn" data-tab="broadcasters">總領隊名單</button>
     <button class="tab-btn" data-tab="emergencies">🚨 緊急聯絡</button>
@@ -119,6 +120,22 @@
         <thead><tr><th>關卡</th><th>名稱</th><th>LINE 帳號（末 6 碼）</th><th>登記時間</th><th>操作</th></tr></thead>
         <tbody id="referees-body"></tbody>
       </table>
+    </section>
+
+    <!-- LINE 使用者（查 userId） -->
+    <section class="panel" id="panel-line-users">
+      <div class="toolbar" style="align-items:flex-start;">
+        <textarea id="line-users-q" rows="2" style="flex:1;min-width:240px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font:inherit;" placeholder="輸入名字搜尋；要一次找多人，用換行、逗號或頓號分隔，例如：小柏、AJ、芊芊"></textarea>
+        <button class="btn secondary" id="refresh-line-users">🔄 重新整理</button>
+        <button class="btn" id="copy-line-users">📋 複製目前結果</button>
+      </div>
+      <div class="msg" id="line-users-msg"></div>
+      <p id="line-users-missing" style="font-size:13px;color:#c0392b;margin:0 0 10px;"></p>
+      <table>
+        <thead><tr><th>LINE 名稱</th><th>userId</th><th>目前身分</th><th>最後互動</th><th></th></tr></thead>
+        <tbody id="line-users-body"></tbody>
+      </table>
+      <p style="font-size:12px;color:#888;">名單是「傳過訊息或加好友的人」，最近有互動的排前面；搜尋時空白、大小寫不影響結果。找不到的人請他傳任何一句話給官方帳號（例如「我的ID」）再按重新整理。</p>
     </section>
 
     <!-- 小隊長名單 -->
