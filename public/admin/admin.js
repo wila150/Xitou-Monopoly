@@ -726,8 +726,14 @@ function updateEmergencyBadge(count) {
 
 function submissionCardHtml(r) {
   const mediaUrl = `/admin/api/submissions/${r.id}/media`;
-  const mediaEl =
-    r.mediaType === "video"
+  const kindLabel = r.mediaType === "video" ? "影片" : "照片";
+  const mediaEl = !r.hasData
+    ? `<div class="media-pending" style="background:#fff8e1;border:1px dashed #d4a017;border-radius:6px;padding:14px;font-size:13px;color:#7a5b00;">
+         ⏳ ${kindLabel}還在處理中（LINE 轉檔中），系統會自動重試下載，好了這裡會自動出現預覽。
+         ${r.downloadAttempts ? `<br><span style="font-size:12px;">已重試 ${r.downloadAttempts} 次${r.downloadError ? `，最近一次：${escapeHtml(r.downloadError)}` : ""}</span>` : ""}
+         <br><span style="font-size:12px;">不想等的話，可以先到 LINE 聊天記錄確認內容，再直接按「✅ 通過」。</span>
+       </div>`
+    : r.mediaType === "video"
       ? `<video src="${mediaUrl}" controls preload="metadata" playsinline style="max-width:100%;max-height:360px;border-radius:6px;"></video>`
       : `<a href="${mediaUrl}" target="_blank" rel="noopener"><img src="${mediaUrl}" alt="第 ${r.groupNo} 組上傳的照片" style="max-width:100%;max-height:360px;border-radius:6px;" /></a>`;
   return `
@@ -741,6 +747,7 @@ function submissionCardHtml(r) {
       </p>
       <div class="toolbar" style="margin-top:10px;">
         <button class="btn approve-submission" data-id="${r.id}">✅ 通過</button>
+        ${r.hasData ? "" : `<button class="btn secondary retry-submission" data-id="${r.id}">🔄 重試下載</button>`}
         <button class="btn danger reject-submission" data-id="${r.id}">🗑 移除</button>
       </div>
     </div>
@@ -803,6 +810,27 @@ function bindSubmissionCards(list) {
       }
     });
   });
+  list.querySelectorAll(".retry-submission").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "下載中…（最多 15 秒）";
+      try {
+        const res = await api(`/api/submissions/${btn.dataset.id}/retry`, { method: "POST" });
+        const text = {
+          filled: "已抓到內容，預覽已載入。",
+          pending: `還沒準備好，稍後會自動再試。${res.error ? `（${res.error}）` : ""}`,
+          failed: `內容不合格，無法預覽：${res.error || ""}`,
+          gone: "這筆已經被處理掉了。",
+        }[res.status] || "完成";
+        showMsg(submissionsMsg, text, res.status !== "filled");
+        await loadSubmissions();
+      } catch (err) {
+        showMsg(submissionsMsg, err.message, true);
+        btn.disabled = false;
+        btn.textContent = "🔄 重試下載";
+      }
+    });
+  });
   list.querySelectorAll(".reject-submission").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm("只會移除這筆待審核紀錄，不會讓隊伍過關，確定嗎？")) return;
@@ -821,7 +849,7 @@ let lastSubmissionIds = "";
 async function loadSubmissions({ silent = false } = {}) {
   const rows = await api("/api/submissions");
   updatePendingBadge(rows.length);
-  const ids = rows.map((r) => r.id).join(",");
+  const ids = rows.map((r) => `${r.id}:${r.hasData ? 1 : 0}:${r.downloadAttempts}`).join(",");
   // 自動更新時內容沒變就不重畫，避免影片播放到一半被打斷
   if (silent && ids === lastSubmissionIds) return;
   lastSubmissionIds = ids;

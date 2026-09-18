@@ -410,7 +410,7 @@ test("審核佇列：空檔不會存進去；舊版留下的空檔，預覽網�
   const saved = await submissionStore.saveSubmission({
     groupNo: 1, checkpointId: "E3", mediaType: "video", mimeType: "video/mp4", buffer: Buffer.alloc(0), submittedBy: "Ux",
   });
-  assert.equal(saved, false, "空的內容不存");
+  assert.equal(saved, null, "空的內容不存");
 
   // 舊版可能已經存進空檔：直接寫一筆模擬
   const row = await dbModule.db.get(
@@ -426,7 +426,7 @@ test("審核佇列：空檔不會存進去；舊版留下的空檔，預覽網�
   const good = await submissionStore.saveSubmission({
     groupNo: 2, checkpointId: "E3", mediaType: "video", mimeType: "video/mp4", buffer: Buffer.from("0123456789"), submittedBy: "Ux",
   });
-  assert.equal(good, true);
+  assert.equal(typeof good, "number", "有內容就存，回傳紀錄 id");
   const goodRow = (await api("/submissions")).data.find((r) => r.groupNo === 2);
   const ranged = await fetch(`${base}/api/submissions/${goodRow.id}/media`, { headers: { Cookie: cookie, Range: "bytes=2-5" } });
   assert.equal(ranged.status, 206);

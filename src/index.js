@@ -11,6 +11,7 @@ const db = require("./db");
 const configStore = require("./config/configStore");
 const imageStore = require("./config/imageStore");
 const lineUserStore = require("./config/lineUserStore");
+const mediaRetry = require("./mediaRetry");
 const adminRouter = require("./admin/router");
 
 const app = express();
@@ -126,9 +127,13 @@ async function handleEvent(event) {
         // 影片要等 LINE 轉檔完成才抓得到完整內容；抓到的東西會檢查大小與格式，不合格就丟錯（見 lineContent.js）
         media = await lineClient.getMessageContent(event.message.id, event.message.type);
       } catch (err) {
-        console.error("下載使用者上傳的照片／影片內容失敗：", err);
+        console.error("下載使用者上傳的照片／影片內容失敗（會先存成等待下載，背景重試）：", err.message || err);
       }
-      const { reply, adminNotify } = await teamService.submitMedia(userId, media);
+      const { reply, adminNotify, pendingDownloadId } = await teamService.submitMedia(userId, media, {
+        lineMessageId: event.message.id,
+      });
+      // 沒抓到內容的話（通常是影片還在轉檔），背景重試下載，抓到就補進後台預覽
+      if (pendingDownloadId) mediaRetry.scheduleRetries(pendingDownloadId, lineClient.getMessageContent);
       result = { reply, groupBroadcasts: [], directPushes: adminNotify || [] };
     } else {
       return;
@@ -172,6 +177,9 @@ db.init()
     app.listen(PORT, () => {
       console.log(`LINE 闖關系統伺服器已啟動，監聽埠 ${PORT}`);
       scheduler.start();
+      mediaRetry
+        .resumePending(lineClient.getMessageContent)
+        .catch((err) => console.error("接續重試審核媒體下載失敗：", err));
       backfillLineUsers().catch((err) => console.error("補登 LINE 使用者名單失敗：", err));
     });
   })

@@ -153,15 +153,20 @@ CREATE TABLE IF NOT EXISTS checkpoint_images (
 -- 可以直接預覽內容再決定通過，不用再翻 LINE 聊天記錄。小編按下「通過」或用 LINE 指令「通過 X組」
 -- 解鎖下一關後，該組所有待審核紀錄都會被刪除（見 teamService.deleteSubmissionsForGroup）。
 -- 影片超過大小上限（見 submissionStore.js）不會存進這張表，退回原本的純文字通知方式。
+-- data 為 NULL 表示「LINE 還在處理（影片轉檔中），內容還沒抓到」：先讓小編看得到這筆送審，
+-- 系統會用 line_message_id 在背景重試下載，抓到就補進 data（見 src/mediaRetry.js）。
 CREATE TABLE IF NOT EXISTS pending_submissions (
-  id             SERIAL PRIMARY KEY,
-  group_no       INTEGER NOT NULL,
-  checkpoint_id  TEXT NOT NULL,
-  media_type     TEXT NOT NULL,
-  mime_type      TEXT NOT NULL,
-  data           BYTEA NOT NULL,
-  submitted_by   TEXT NOT NULL,
-  submitted_at   TEXT NOT NULL
+  id                SERIAL PRIMARY KEY,
+  group_no          INTEGER NOT NULL,
+  checkpoint_id     TEXT NOT NULL,
+  media_type        TEXT NOT NULL,
+  mime_type         TEXT NOT NULL,
+  data              BYTEA,
+  submitted_by      TEXT NOT NULL,
+  submitted_at      TEXT NOT NULL,
+  line_message_id   TEXT,
+  download_error    TEXT,
+  download_attempts INTEGER NOT NULL DEFAULT 0
 );
 
 -- 傳過訊息（或加好友）給官方帳號的人：讓後台可以直接「挑名字」指定關主／總領隊，不用複製 userId。
@@ -249,6 +254,17 @@ async function init() {
   await pool.query(SCHEMA_SQL);
   await migrateCheckpointImageColumns();
   await migrateBonusPointsColumn();
+  await migratePendingSubmissionColumns();
+}
+
+// 既有正式環境的 pending_submissions 是舊版欄位（data 不能是 NULL、沒有 LINE 訊息 ID）：補欄位並放寬 data，可重複執行
+async function migratePendingSubmissionColumns() {
+  await pool.query("ALTER TABLE pending_submissions ALTER COLUMN data DROP NOT NULL");
+  await pool.query("ALTER TABLE pending_submissions ADD COLUMN IF NOT EXISTS line_message_id TEXT");
+  await pool.query("ALTER TABLE pending_submissions ADD COLUMN IF NOT EXISTS download_error TEXT");
+  await pool.query(
+    "ALTER TABLE pending_submissions ADD COLUMN IF NOT EXISTS download_attempts INTEGER NOT NULL DEFAULT 0"
+  );
 }
 
 module.exports = { db, transaction, init, pool };

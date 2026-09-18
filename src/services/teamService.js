@@ -483,7 +483,7 @@ async function verifyKeyword(userId, text) {
 // media（可省略）：{ buffer, mimeType } 是從 LINE 下載到的實際照片／影片內容，
 // 存進審核佇列讓後台網頁「照片／影片審核」分頁可以直接預覽。太大（見 submissionStore）或呼叫端沒傳就不存，
 // 退回純文字通知＋LINE聊天記錄查看的舊方式，行為不會壞掉。
-async function submitMedia(userId, media = null) {
+async function submitMedia(userId, media = null, { lineMessageId = null } = {}) {
   return transaction(async (tx) => {
     const guard = await checkAttemptGuards(tx, userId);
     if (guard.blocked !== undefined) return { reply: guard.blocked, adminNotify: [] };
@@ -507,19 +507,25 @@ async function submitMedia(userId, media = null) {
     }
 
     const kind = cp.verifyType === "video" ? "影片" : "照片";
-    let stored = false;
-    if (media) {
-      stored = await submissionStore.saveSubmission({
-        groupNo: team.group_no,
-        checkpointId: cp.id,
-        mediaType: cp.verifyType,
-        mimeType: media.mimeType,
-        buffer: media.buffer,
-        submittedBy: userId,
-      });
-    }
+    // 有內容就直接存；沒抓到內容但有 LINE 訊息 ID（通常是影片還在轉檔）就先存一筆「等待下載」的紀錄，
+    // 讓小編馬上看得到這筆送審，呼叫端會在背景重試下載（見 mediaRetry.js）。
+    const submissionId = await submissionStore.saveSubmission({
+      groupNo: team.group_no,
+      checkpointId: cp.id,
+      mediaType: cp.verifyType,
+      mimeType: media ? media.mimeType : cp.verifyType === "video" ? "video/mp4" : "image/jpeg",
+      buffer: media ? media.buffer : null,
+      submittedBy: userId,
+      lineMessageId,
+    });
+    const stored = submissionId !== null;
+    const awaitingDownload = stored && !media;
     const base = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
-    const adminText = stored
+    const adminText = awaitingDownload
+      ? `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}，LINE 還在處理，後台預覽稍後會自動出現（也可以直接到官方帳號聊天記錄確認）。\n` +
+        `確認沒問題請輸入「通過 ${team.group_no}組」，或在後台按「✅ 通過」解鎖下一關。` +
+        (base ? `\n👉 ${base}/admin#submissions` : "")
+      : stored
       ? `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}，可至後台網頁「照片／影片審核」分頁直接預覽。\n` +
         `確認沒問題請輸入「通過 ${team.group_no}組」，或直接在後台按「✅ 通過」解鎖下一關。` +
         (base ? `\n👉 ${base}/admin#submissions` : "")
@@ -549,6 +555,8 @@ async function submitMedia(userId, media = null) {
     return {
       reply: [textMsg(`📮 已收到您上傳的${kind}，請等待${refereeRows.length > 0 ? "小編或關主" : "小編"}確認後解鎖下一關。`)],
       adminNotify: notify,
+      // 有值代表這筆還沒抓到內容，呼叫端要排程重試下載
+      pendingDownloadId: awaitingDownload ? submissionId : null,
     };
   });
 }
@@ -625,6 +633,9 @@ async function listPendingSubmissions() {
       checkpointName,
       mediaType: r.media_type,
       submittedAt: r.submitted_at,
+      hasData: !!r.has_data,
+      downloadError: r.download_error,
+      downloadAttempts: r.download_attempts,
     };
   });
 }

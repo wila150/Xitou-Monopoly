@@ -10,6 +10,7 @@ const imageStore = require("../config/imageStore");
 const submissionStore = require("../config/submissionStore");
 const teamService = require("../services/teamService");
 const lineClient = require("../lineClient");
+const mediaRetry = require("../mediaRetry");
 
 const router = express.Router();
 const PUBLIC_ADMIN_DIR = path.join(__dirname, "..", "..", "public", "admin");
@@ -272,11 +273,26 @@ router.get("/api/submissions/:id/media", async (req, res, next) => {
   try {
     const media = await submissionStore.getSubmissionMedia(Number(req.params.id));
     if (!media) return res.status(404).json({ error: "找不到這筆待審核媒體，可能已經被處理過" });
+    if (media.data === null) {
+      return res.status(404).json({ error: "影片還在處理中（LINE 轉檔中），系統會自動重試，也可以按「重試下載」" });
+    }
     if (media.data.length === 0) {
       // 舊版在 LINE 還在轉檔時下載影片，可能存進空檔；明確回報，後台預覽失敗時會顯示這個原因
       return res.status(404).json({ error: "這筆檔案是空的（下載時 LINE 內容還沒準備好），請到 LINE 聊天記錄確認，並請隊伍重傳" });
     }
     sendWithRange(req, res, media.mime_type, media.data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 手動重試下載：還在等內容（LINE 轉檔中）的那筆，立刻再抓一次
+router.post("/api/submissions/:id/retry", async (req, res, next) => {
+  try {
+    const result = await mediaRetry.attemptDownload(Number(req.params.id), lineClient.getMessageContent, {
+      maxWaitMs: 15000,
+    });
+    res.json({ ok: true, status: result.status, error: result.error || null });
   } catch (err) {
     next(err);
   }
