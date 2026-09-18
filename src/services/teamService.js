@@ -861,6 +861,19 @@ async function findLineUser(query) {
   const byId = users.filter((u) => u.user_id === q);
   if (byId.length === 1) return { status: "ok", user: byId[0] };
 
+  // 完整 userId（U 加 32 位十六進位）就算不在名單裡也能直接用：之前留過言、但這個版本上線前的人，
+  // userId 在 Render 的 Logs（搜尋「收到訊息：userId=」）裡找得到。順手記進名單並嘗試補上顯示名稱。
+  if (/^U[0-9a-f]{32}$/i.test(q)) {
+    const now = nowIso();
+    await db.run(
+      `INSERT INTO line_users (user_id, first_seen_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT (user_id) DO NOTHING`,
+      [q, now, now]
+    );
+    const name = await lookupDisplayName(q);
+    if (name) await db.run("UPDATE line_users SET display_name = ? WHERE user_id = ?", [name, q]);
+    return { status: "ok", user: { user_id: q, display_name: name } };
+  }
+
   // 末碼：至少 6 個英數字才當作 userId 片段，避免「小明」之類的名字被誤判
   const bySuffix = /^[A-Za-z0-9]{6,}$/.test(q) ? users.filter((u) => u.user_id.toLowerCase().endsWith(lower)) : [];
   if (bySuffix.length === 1) return { status: "ok", user: bySuffix[0] };
@@ -888,7 +901,7 @@ async function adminRoleCommand(kind, action, query, checkpointId = null) {
     return {
       reply: [
         textMsg(
-          `🔎 找不到「${query}」。對方需要先傳任何一句話給官方帳號（例如「我的ID」），才找得到人；名字可以打 LINE 顯示名稱的一部分，或 userId 末 6 碼以上。`
+          `🔎 找不到「${query}」。對方需要先傳任何一句話給官方帳號（例如「我的ID」），才找得到人；名字可以打 LINE 顯示名稱的一部分，或 userId 末 6 碼以上。之前就留過言的人，也可以直接貼完整 userId（Render Logs 搜尋「收到訊息：userId=」）。`
         ),
       ],
     };

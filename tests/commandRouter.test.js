@@ -1377,3 +1377,29 @@ test("小編用 LINE 指令綁定關主／總領隊：指定關主 B3 名字（�
   assert.doesNotMatch(textsOf(await commandRouter.route("Umember1", "使用說明")).join("\n"), /指定關主/);
   await dbModule.db.run("DELETE FROM line_users");
 });
+
+test("小編指定關主：貼完整 userId 就算不在名單裡也能綁定（之前留過言的人），並記進名單；格式不對的當作名字找", async () => {
+  await resetGame();
+  await dbModule.db.run("DELETE FROM line_users");
+  const oldUserId = "U" + "0123456789abcdef".repeat(2); // U + 32 位十六進位
+
+  const assign = await commandRouter.route(ADMIN, `指定關主 B3 ${oldUserId}`);
+  assert.match(textsOf(assign)[0], /已指定為「.*」（B3）的關主/);
+  assert.equal(assign.directPushes[0].to, oldUserId, "通知推給這個 userId");
+  assert.equal(await teamService.getRefereeCheckpoint(oldUserId), "B3");
+  const users = await dbModule.db.all("SELECT user_id FROM line_users");
+  assert.deepEqual(users.map((u) => u.user_id), [oldUserId], "順手記進人員名單");
+
+  // 之後用末碼也找得到
+  assert.match(textsOf(await commandRouter.route(ADMIN, "取消關主 cdef"))[0], /找不到/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, `取消關主 ${oldUserId.slice(-8)}`))[0], /已取消 B3 關主/);
+
+  // 長度不對、不是 U 開頭的不會被當成 userId，照名字找不到就提示
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定關主 B3 U0123"))[0], /找不到/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定關主 B3 " + "X".repeat(33)))[0], /找不到/);
+
+  // 隊伍成員的 userId 貼進來一樣被擋
+  await commandRouter.route(oldUserId, "報到 1組");
+  assert.match(textsOf(await commandRouter.route(ADMIN, `指定關主 B3 ${oldUserId}`))[0], /已經是第 1 組的成員/);
+  await dbModule.db.run("DELETE FROM line_users");
+});
