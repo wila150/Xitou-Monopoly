@@ -43,6 +43,12 @@ app.use("/maps", express.static(path.join(__dirname, "..", "public", "maps")));
 
 app.get("/health", (req, res) => res.status(200).send("ok"));
 
+// 目前部署的版本（Render 會自動帶入 RENDER_GIT_COMMIT），部署後可以用它確認新版是否已經上線
+app.get("/version", (req, res) => {
+  const commit = process.env.RENDER_GIT_COMMIT || "";
+  res.json({ commit: commit.slice(0, 7) || null });
+});
+
 app.use("/admin", adminRouter);
 
 app.post("/webhook", lineClient.webhookMiddleware, async (req, res) => {

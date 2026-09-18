@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "routes:export": "node scripts/routes-export-csv.js",
     "routes:import": "node scripts/routes-import-csv.js",
     "checkpoints:export": "node scripts/checkpoints-export-csv.js",

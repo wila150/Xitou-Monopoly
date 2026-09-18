@@ -318,20 +318,98 @@ async function loadProgress() {
         FINISHED: "已終點確認",
       }[r.status] || r.status;
       const bonus = r.bonusPoints || 0;
+      const canDepart = r.status === "CHECKED_IN";
+      const canFinish = r.status === "IN_PROGRESS";
       return `
         <tr>
+          <td>${canDepart || canFinish ? `<input type="checkbox" class="${canDepart ? "depart-check" : "finish-check"}" value="${r.groupNo}" />` : ""}</td>
           <td>第 ${r.groupNo} 組</td>
           <td><span class="status-tag status-${r.status}">${statusLabel}</span></td>
+          <td>${r.startTime ? formatClock(r.startTime) : "-"}</td>
+          <td>${r.finishTime ? formatClock(r.finishTime) : "-"}</td>
           <td>${r.currentIndex != null ? `${r.currentIndex}/${r.totalCheckpoints}` : "-"}</td>
           <td>${r.elapsed || "-"}</td>
           <td>${r.isLate === true ? "⚠️ 逾時" : r.isLate === false ? "準時" : "-"}</td>
           <td>${bonus !== 0 ? (bonus > 0 ? `+${bonus}` : bonus) : "-"}</td>
+          <td>
+            ${canDepart ? `<button class="btn depart-one" data-group="${r.groupNo}">🚩 出發</button>` : ""}
+            ${canFinish ? `<button class="btn finish-one" data-group="${r.groupNo}">🏁 到站</button>` : ""}
+          </td>
         </tr>
       `;
     })
     .join("");
+  document.querySelectorAll(".depart-one").forEach((btn) => {
+    btn.addEventListener("click", () => departGroups([Number(btn.dataset.group)]));
+  });
+  document.querySelectorAll(".finish-one").forEach((btn) => {
+    btn.addEventListener("click", () => finishGroups([Number(btn.dataset.group)]));
+  });
 }
 document.getElementById("refresh-progress").addEventListener("click", loadProgress);
+
+// 時分秒＋日期（台北時間），出發時間要看到秒才對得上逾時判斷
+function formatClock(iso) {
+  return new Date(iso).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false });
+}
+
+// ---- 後台出發／到站 ----
+// 兩者流程一樣：確認 → 呼叫 API（可帶補登時間）→ 彙整每組結果。差別只在 API 路徑、時間欄位與文字。
+let groupActionRunning = false;
+async function runGroupAction({ groupNos, path, timeInputId, timeField, verb, warning }) {
+  if (groupActionRunning) return;
+  if (groupNos.length === 0) {
+    showMsg(progressMsg, `請先勾選要${verb}的組別。`, true);
+    return;
+  }
+  const timeInput = document.getElementById(timeInputId).value;
+  const iso = timeInput ? new Date(timeInput).toISOString() : null;
+  const when = timeInput ? `${verb}時間 ${timeInput.replace("T", " ")}` : `${verb}時間：現在`;
+  const names = groupNos.map((g) => `第 ${g} 組`).join("、");
+  if (!confirm(`確定讓 ${names} ${verb}嗎？\n${when}\n\n${warning}`)) return;
+  groupActionRunning = true;
+  try {
+    const { results } = await api(path, {
+      method: "POST",
+      body: JSON.stringify({ groupNos, [timeField]: iso }),
+    });
+    const ok = results.filter((r) => r.done).map((r) => r.groupNo);
+    const skipped = results.filter((r) => !r.done).map((r) => `第 ${r.groupNo} 組：${r.message}`);
+    const notifyFailed = results.filter((r) => r.notifyFailed).map((r) => r.groupNo);
+    let text = ok.length ? `已${verb}：${ok.map((g) => `第 ${g} 組`).join("、")}。` : "";
+    if (skipped.length) text += ` 未${verb}：${skipped.join("；")}`;
+    if (notifyFailed.length) text += ` ⚠️ 第 ${notifyFailed.join("、")} 組已記錄，但 LINE 通知沒送出，請到 LINE 手動通知。`;
+    showMsg(progressMsg, text.trim(), skipped.length > 0 || notifyFailed.length > 0);
+    await loadProgress();
+  } catch (err) {
+    showMsg(progressMsg, err.message, true);
+  } finally {
+    groupActionRunning = false;
+  }
+}
+
+const departGroups = (groupNos) =>
+  runGroupAction({
+    groupNos,
+    path: "/api/depart",
+    timeInputId: "depart-time",
+    timeField: "startedAt",
+    verb: "出發",
+    warning: "出發後會開始計時並推播第一關給隊伍，無法取消。",
+  });
+const finishGroups = (groupNos) =>
+  runGroupAction({
+    groupNos,
+    path: "/api/finish",
+    timeInputId: "finish-time",
+    timeField: "finishedAt",
+    verb: "到站",
+    warning: "到站後會停止計時並依出發後是否超過 2 小時標註準時／逾時；按錯可在 LINE 輸入「取消到站 X組」更正。",
+  });
+
+const checkedGroups = (selector) => [...document.querySelectorAll(selector + ":checked")].map((c) => Number(c.value));
+document.getElementById("depart-selected").addEventListener("click", () => departGroups(checkedGroups(".depart-check")));
+document.getElementById("finish-selected").addEventListener("click", () => finishGroups(checkedGroups(".finish-check")));
 
 const progressMsg = document.getElementById("progress-msg");
 document.getElementById("reset-game").addEventListener("click", async () => {

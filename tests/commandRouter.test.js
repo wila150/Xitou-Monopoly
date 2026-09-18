@@ -743,7 +743,7 @@ test("退回：小編手滑連按兩次「通過」造成跳關，可以用「�
   assert.match(textsOf(noMore)[0], /沒有可以退回的關卡進度/);
 });
 
-test("退回：也可以取消誤觸的終點確認，讓該組恢復闖關中繼續計時", async () => {
+test("退回：還沒完成任何關卡就被終點確認時，沒有關卡可退，只取消終點確認", async () => {
   await resetGame();
   await commandRouter.route("Uleader", "報到 1組");
   await commandRouter.route(ADMIN, "出發 1組");
@@ -758,6 +758,74 @@ test("退回：也可以取消誤觸的終點確認，讓該組恢復闖關中�
   team = await teamService.findTeam(1);
   assert.equal(team.status, "IN_PROGRESS");
   assert.equal(team.finish_time, null);
+  assert.equal(team.current_index, 0);
+});
+
+test("退回：已完成 12 關並到站的組別，退回會真的退一關（12→11）並取消終點確認、清掉結束時間與逾時，排行榜與查詢同步更新", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route("Ureferee", "我是 A2 關主"); // 用來驗證退回後關主會被通知
+  await teamService.depart(1, new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()); // 出發 3 小時前，到站會逾時
+  for (let i = 0; i < 12; i++) await commandRouter.route(ADMIN, "通過 1組");
+  await commandRouter.route(ADMIN, "到站 1組");
+
+  let team = await teamService.findTeam(1);
+  assert.equal(team.status, "FINISHED");
+  assert.equal(team.current_index, 12);
+  assert.equal(team.is_late, 1);
+  const lastCheckpointId = getRoute(1)[11].checkpointId;
+
+  const revert = await commandRouter.route(ADMIN, "退回 1組");
+  assert.match(textsOf(revert)[0], /退回到「.*」（11\/12 關）.*一併取消終點確認/);
+  assert.match(revert.groupBroadcasts[0].messages[0].text, /終點確認也已取消/);
+
+  team = await teamService.findTeam(1);
+  assert.equal(team.current_index, 11, "完成關卡數真的 -1");
+  assert.equal(team.status, "IN_PROGRESS");
+  assert.equal(team.finish_time, null, "結束時間清掉");
+  assert.equal(team.is_late, 0, "逾時標記清掉，之後真的到站再重新判斷");
+
+  // 隊伍查詢：回到第 12 關（目前關卡）、闖關進度 11/12
+  const current = allTexts((await commandRouter.route("Uleader", "目前關卡")).reply).join("\n");
+  assert.match(current, new RegExp(getCheckpoint(lastCheckpointId).name));
+  assert.match(textsOf(await commandRouter.route("Uleader", "闖關進度"))[0], /已完成 11\/12 關/);
+
+  // 排行榜與小編總覽：11/12、未歸隊，不再是 12/12 準時／逾時
+  await commandRouter.route(ADMIN, "排行榜開啟");
+  const ranking = textsOf(await commandRouter.route(ADMIN, "排行榜"))[0];
+  assert.match(ranking, /1組｜11\/12｜目前耗時 .*（未歸隊）/);
+  assert.doesNotMatch(ranking, /12\/12/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "進度"))[0], /1組｜闖關中｜11\/12/);
+
+  // 該關的通過紀錄被刪掉：可以再通過一次，重新到站後照新的時間判斷
+  const logRows = await dbModule.db.all("SELECT * FROM checkpoint_log WHERE group_no = 1");
+  assert.equal(logRows.length, 11);
+  await commandRouter.route(ADMIN, "通過 1組");
+  assert.equal((await teamService.findTeam(1)).current_index, 12);
+});
+
+test("取消到站：只取消誤按的終點確認，完成關卡數不變；非小編不能用；沒有終點確認時提示", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+  for (let i = 0; i < 12; i++) await commandRouter.route(ADMIN, "通過 1組");
+  await commandRouter.route(ADMIN, "到站 1組");
+
+  assert.match(textsOf(await commandRouter.route("Uleader", "取消到站 1組"))[0], /僅限小編使用/);
+  assert.equal((await teamService.findTeam("1")).status, "FINISHED");
+
+  const cancel = await commandRouter.route(ADMIN, "取消到站 1組");
+  assert.match(textsOf(cancel)[0], /已取消第 1 組的終點確認（完成關卡數維持 12\/12）/);
+  const team = await teamService.findTeam(1);
+  assert.equal(team.status, "IN_PROGRESS");
+  assert.equal(team.current_index, 12, "完成關卡數不變");
+  assert.equal(team.finish_time, null);
+
+  assert.match(textsOf(await commandRouter.route(ADMIN, "取消到站 1組"))[0], /沒有終點確認可以取消/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "取消到站 8組"))[0], /尚未有任何成員報到/);
+
+  // 重新到站後恢復正常
+  assert.match(textsOf(await commandRouter.route(ADMIN, "到站 1組"))[0], /已為第 1 組辦理終點確認/);
 });
 
 test("逾時判斷是看「出發後經過多久」，不是比對當天固定時刻", async () => {

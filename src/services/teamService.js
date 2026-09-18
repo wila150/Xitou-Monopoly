@@ -213,7 +213,8 @@ function adminHelpMsg() {
     [
       "📖 使用說明｜小編",
       "• 通過 X組：任何關卡都能直接通過，不受關主登記限制",
-      "• 退回 X組：更正誤觸的通過或到站",
+      "• 退回 X組：退回一關（完成關卡數 -1；已終點確認的會一併取消終點確認）",
+      "• 取消到站 X組：只取消誤按的終點確認，完成關卡數不變",
       "• 解除綁定 X組：清空該組的綁定與報到",
       "• 確認換隊長 X組：核准組員的換隊長申請",
       "• 加分 X組 N 理由：加分或扣分（N 可以是負數）",
@@ -306,9 +307,11 @@ async function checkin(groupNo, userId) {
   });
 }
 
-// ---- 二、出發（現場關主觸發）----
+// ---- 二、出發（現場關主／小編觸發，後台網頁也能觸發）----
+// 每組的「出發時間」是耗時與逾時判斷的起點（見 timeUtil.isLate）。startedAt（ISO 字串，可省略）讓後台可以
+// 補登實際出發的時間（例如現場已經出發、小編晚一點才按），省略就是現在；合理性檢查在呼叫端（見 parseStartedAt）。
 
-async function depart(groupNo) {
+async function depart(groupNo, startedAt = null) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
@@ -322,7 +325,7 @@ async function depart(groupNo) {
     }
 
     const route = getRoute(groupNo);
-    const ts = nowIso();
+    const ts = startedAt || nowIso();
     await tx.run(
       `UPDATE teams SET status = 'IN_PROGRESS', start_time = ?, current_index = 0 WHERE group_no = ?`,
       [ts, groupNo]
@@ -333,7 +336,11 @@ async function depart(groupNo) {
     const refereePushes = await getRefereePushesForCheckpoint(route[0].checkpointId, groupNo);
 
     return {
-      reply: [textMsg(`🚩 已將第 ${groupNo} 組標記為出發。`)],
+      reply: [
+        textMsg(
+          `🚩 已將第 ${groupNo} 組標記為出發` + (startedAt ? `（出發時間 ${taipeiTime(startedAt)}）` : "") + "。"
+        ),
+      ],
       groupBroadcast: { groupNo, messages: teamMessages },
       directPushes: refereePushes,
     };
@@ -797,7 +804,9 @@ async function broadcastMessage(target, text) {
 
 // ---- 三之四、退回一關（更正「通過」／「到站」誤觸或手滑重複的情況）----
 // 「通過」不是天然冪等的操作（每按一次就前進一關），連按兩次或按錯組別都沒有事前防呆，
-// 這裡提供事後更正的方式：FINISHED 就取消終點確認、否則就退回最近一次過的那一關。
+// 這裡提供事後更正的方式。「退回」每次都真的退一關（完成關卡數 -1、該關通過紀錄刪除）：
+// 已經辦理終點確認的組別也一樣，會一併取消終點確認、清掉結束時間與逾時標記，計時從出發時間繼續累加，
+// 之後真正到站時再重新記錄結束時間。只想取消誤按的「到站」、不想退關卡的話用「取消到站」（見 cancelFinish）。
 
 async function revertLastCheckpoint(groupNo) {
   return transaction(async (tx) => {
@@ -805,25 +814,14 @@ async function revertLastCheckpoint(groupNo) {
     if (!team) {
       return { reply: [textMsg(`⚠️ 第 ${groupNo} 組尚未有任何成員報到。`)] };
     }
-
-    if (team.status === "FINISHED") {
-      await tx.run(
-        `UPDATE teams SET status = 'IN_PROGRESS', finish_time = NULL, is_late = 0 WHERE group_no = ?`,
-        [groupNo]
-      );
-      return {
-        reply: [textMsg(`♻️ 已取消第 ${groupNo} 組的終點確認，該組恢復為闖關中，計時繼續累加。`)],
-        groupBroadcast: {
-          groupNo,
-          messages: [
-            textMsg("⚠️ 小編剛剛取消了終點確認，貴隊狀態恢復為闖關中，請留意後續指示。"),
-          ],
-        },
-      };
-    }
+    const wasFinished = team.status === "FINISHED";
 
     if (team.status === "CHECKED_IN" || team.current_index === 0) {
-      return { reply: [textMsg(`⚠️ 第 ${groupNo} 組目前沒有可以退回的關卡進度。`)] };
+      if (!wasFinished) {
+        return { reply: [textMsg(`⚠️ 第 ${groupNo} 組目前沒有可以退回的關卡進度。`)] };
+      }
+      // 還沒完成任何關卡就被終點確認：沒有關卡可退，只能取消終點確認
+      return cancelFinishInTx(tx, team);
     }
 
     const newIndex = team.current_index - 1;
@@ -835,28 +833,69 @@ async function revertLastCheckpoint(groupNo) {
       `DELETE FROM checkpoint_log WHERE group_no = ? AND checkpoint_index = ?`,
       [groupNo, newIndex]
     );
-    await tx.run(`UPDATE teams SET current_index = ? WHERE group_no = ?`, [
-      newIndex,
-      groupNo,
-    ]);
+    await tx.run(
+      `UPDATE teams SET current_index = ?, status = 'IN_PROGRESS', finish_time = NULL, is_late = 0 WHERE group_no = ?`,
+      [newIndex, groupNo]
+    );
 
+    const finishNote = wasFinished ? "，並一併取消終點確認（該組恢復闖關中，計時繼續累加）" : "";
     return {
-      reply: [textMsg(`♻️ 已將第 ${groupNo} 組退回到「${cp.name}」，該關重新視為未完成。`)],
+      reply: [
+        textMsg(
+          `♻️ 已將第 ${groupNo} 組退回到「${cp.name}」（${newIndex}/${event.totalCheckpoints} 關）${finishNote}，該關重新視為未完成。`
+        ),
+      ],
       groupBroadcast: {
         groupNo,
         messages: [
           textMsg(
-            `⚠️ 小編剛剛更正了進度：「${cp.name}」重新視為未完成，請重新完成這一關的任務。`
+            `⚠️ 小編剛剛更正了進度：「${cp.name}」重新視為未完成${wasFinished ? "，終點確認也已取消" : ""}，請重新完成這一關的任務。`
           ),
         ],
       },
+      directPushes: await getRefereePushesForCheckpoint(cp.id, groupNo),
     };
+  });
+}
+
+// 只取消終點確認，完成關卡數不變（誤按「到站」時用）
+async function cancelFinishInTx(tx, team) {
+  const groupNo = team.group_no;
+  await tx.run(
+    `UPDATE teams SET status = 'IN_PROGRESS', finish_time = NULL, is_late = 0 WHERE group_no = ?`,
+    [groupNo]
+  );
+  return {
+    reply: [
+      textMsg(
+        `♻️ 已取消第 ${groupNo} 組的終點確認（完成關卡數維持 ${team.current_index}/${event.totalCheckpoints}），該組恢復為闖關中，計時繼續累加。`
+      ),
+    ],
+    groupBroadcast: {
+      groupNo,
+      messages: [textMsg("⚠️ 小編剛剛取消了終點確認，貴隊狀態恢復為闖關中，請留意後續指示。")],
+    },
+  };
+}
+
+async function cancelFinish(groupNo) {
+  return transaction(async (tx) => {
+    const team = await findTeam(tx, groupNo);
+    if (!team) {
+      return { reply: [textMsg(`⚠️ 第 ${groupNo} 組尚未有任何成員報到。`)] };
+    }
+    if (team.status !== "FINISHED") {
+      return { reply: [textMsg(`ℹ️ 第 ${groupNo} 組目前沒有終點確認可以取消。`)] };
+    }
+    return cancelFinishInTx(tx, team);
   });
 }
 
 // ---- 四、B6 終點確認（由 B6 終點工作人員現場觸發，模式同「出發 X組」）----
 
-async function finishAtB6(groupNo) {
+// finishedAt（ISO 字串，可省略）讓後台可以補登實際到站的時間，省略就是現在；合理性檢查（不是未來等）在呼叫端，
+// 這裡只檢查不能早於該組的出發時間。
+async function finishAtB6(groupNo, finishedAt = null) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
@@ -876,7 +915,16 @@ async function finishAtB6(groupNo) {
       };
     }
 
-    const ts = nowIso();
+    const ts = finishedAt || nowIso();
+    if (new Date(ts).getTime() < new Date(team.start_time).getTime()) {
+      return {
+        reply: [
+          textMsg(
+            `⚠️ 到站時間不能早於第 ${groupNo} 組的出發時間（${taipeiTime(team.start_time)}），請確認補登的時間。`
+          ),
+        ],
+      };
+    }
     const late = isLate(team.start_time, ts) ? 1 : 0;
     await tx.run(
       `UPDATE teams SET status = 'FINISHED', finish_time = ?, is_late = ? WHERE group_no = ?`,
@@ -898,7 +946,9 @@ async function finishAtB6(groupNo) {
     return {
       reply: [
         textMsg(
-          `🏁 已為第 ${groupNo} 組辦理終點確認。完成關卡數：${team.current_index}/${event.totalCheckpoints}，總耗時：${elapsed}${late ? "（逾時）" : ""}`
+          `🏁 已為第 ${groupNo} 組辦理終點確認` +
+            (finishedAt ? `（到站時間 ${taipeiTime(finishedAt)}）` : "") +
+            `。完成關卡數：${team.current_index}/${event.totalCheckpoints}，總耗時：${elapsed}${late ? "（逾時）" : ""}`
         ),
       ],
       groupBroadcast: { groupNo, messages: teamMessages },
@@ -1388,7 +1438,7 @@ async function adminListProgress() {
       return `${groupNo}組｜已終點確認（${tag}）｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}${bonusText}`;
     }
     const elapsed = formatElapsed(team.start_time, nowIso());
-    return `${groupNo}組｜闖關中｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}${bonusText}`;
+    return `${groupNo}組｜闖關中｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}（${taipeiTime(team.start_time)} 出發）${bonusText}`;
   });
   return [textMsg(`📋 目前進度\n${lines.join("\n")}`)];
 }
@@ -1591,6 +1641,7 @@ module.exports = {
   broadcastMessage,
   BROADCAST_TARGET_LABELS,
   revertLastCheckpoint,
+  cancelFinish,
   finishAtB6,
   freezeProgress,
   requestLeaderTransfer,

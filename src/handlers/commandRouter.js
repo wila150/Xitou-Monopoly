@@ -41,6 +41,7 @@ const DEPART_RE = verbGroupRegex("出發");
 const ARRIVE_RE = verbGroupRegex("到站");
 const APPROVE_RE = verbGroupRegex("通過");
 const REVERT_RE = verbGroupRegex("退回");
+const CANCEL_FINISH_RE = verbGroupRegex("取消到站");
 const REGISTER_REFEREE_RE = /^我是\s*([A-Za-z]\d)\s*關主$/;
 // 「關主報到」「關主綁定」「報到 關主」「綁定 關主」都算，說法不用固定；總領隊同理
 const REFEREE_ENTRY_RE = /^(?:關主\s*(?:報到|綁定)|(?:報到|綁定)\s*關主)$/;
@@ -278,6 +279,17 @@ async function route(userId, rawText) {
     // 小編手滑「通過」/「到站」按錯或按重複時的更正指令：退回一關
     if (!isAdmin(userId)) return adminOnlyDenied();
     const result = await teamService.revertLastCheckpoint(groupNo);
+    return {
+      reply: result.reply,
+      groupBroadcasts: result.groupBroadcast ? [result.groupBroadcast] : [],
+      directPushes: result.directPushes || [],
+    };
+  }
+
+  if ((groupNo = matchGroupNo(text, CANCEL_FINISH_RE)) != null) {
+    // 只取消誤按的「到站」，完成關卡數不變（要退關卡用「退回」）
+    if (!isAdmin(userId)) return adminOnlyDenied();
+    const result = await teamService.cancelFinish(groupNo);
     return {
       reply: result.reply,
       groupBroadcasts: result.groupBroadcast ? [result.groupBroadcast] : [],

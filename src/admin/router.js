@@ -331,6 +331,82 @@ router.post("/api/emergencies/:id/handle", async (req, res, next) => {
   }
 });
 
+// ---- 後台出發：跟 LINE 指令「出發 X組」同一個底層函式，可一次出發多組，可補登實際出發時間 ----
+
+const DEPART_MAX_BACKDATE_MS = 24 * 60 * 60 * 1000;
+const DEPART_CLOCK_SKEW_MS = 60 * 1000;
+
+// 出發／到站時間可省略（＝現在）；有填的話必須是有效時間、不能是未來、不能早於 24 小時前，避免手滑填錯天讓耗時／逾時失真
+function parseEventTime(value, label) {
+  if (value === undefined || value === null || value === "") return { iso: null };
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return { error: `${label}格式不正確` };
+  const now = Date.now();
+  if (d.getTime() > now + DEPART_CLOCK_SKEW_MS) return { error: `${label}不能是未來的時間` };
+  if (d.getTime() < now - DEPART_MAX_BACKDATE_MS) return { error: `${label}不能早於 24 小時前，請確認日期` };
+  return { iso: d.toISOString() };
+}
+
+// 一次處理多個組別：逐組執行 action，再把該組的 LINE 通知推出去。推播失敗不影響已記錄的結果，回報給小編就好。
+async function runForGroups(req, res, next, { timeField, timeLabel, action }) {
+  try {
+    const { groupNos } = req.body || {};
+    if (!Array.isArray(groupNos) || groupNos.length === 0) {
+      return res.status(400).json({ error: "請至少選擇一個組別" });
+    }
+    const groups = [...new Set(groupNos.map(Number))];
+    if (groups.some((g) => !Number.isInteger(g) || g <= 0)) {
+      return res.status(400).json({ error: "組別編號必須是正整數" });
+    }
+    const parsed = parseEventTime((req.body || {})[timeField], timeLabel);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    const results = [];
+    for (const groupNo of groups) {
+      const result = await action(groupNo, parsed.iso);
+      let notifyFailed = false;
+      try {
+        if (result.groupBroadcast) {
+          const recipientIds = await teamService.getGroupBroadcastRecipientIds(groupNo);
+          await lineClient.pushToMany(recipientIds, result.groupBroadcast.messages);
+        }
+        for (const p of result.directPushes || []) {
+          await lineClient.push(p.to, p.messages);
+        }
+      } catch (err) {
+        console.error(`第 ${groupNo} 組通知推播失敗：`, err);
+        notifyFailed = true;
+      }
+      results.push({
+        groupNo,
+        done: !!result.groupBroadcast,
+        notifyFailed,
+        message: (result.reply || []).map((m) => m.text).join("\n"),
+      });
+    }
+    res.json({ ok: true, results });
+  } catch (err) {
+    next(err);
+  }
+}
+
+router.post("/api/depart", (req, res, next) =>
+  runForGroups(req, res, next, {
+    timeField: "startedAt",
+    timeLabel: "出發時間",
+    action: (groupNo, iso) => teamService.depart(groupNo, iso),
+  })
+);
+
+// 後台到站：跟 LINE 指令「到站 X組」同一個底層函式（B6 終點確認），可一次多組、可補登實際到站時間
+router.post("/api/finish", (req, res, next) =>
+  runForGroups(req, res, next, {
+    timeField: "finishedAt",
+    timeLabel: "到站時間",
+    action: (groupNo, iso) => teamService.finishAtB6(groupNo, iso),
+  })
+);
+
 // ---- 加好友歡迎詞 ----
 
 router.get("/api/welcome-message", (req, res) => {

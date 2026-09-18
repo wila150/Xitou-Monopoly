@@ -61,9 +61,33 @@
         <button class="btn danger" id="reset-game" style="margin-left:auto">⚠️ 重置整場遊戲</button>
       </div>
       <div class="msg" id="progress-msg"></div>
+      <div class="toolbar" style="align-items:center;background:#f4f8f4;padding:10px;border-radius:8px;">
+        <strong style="font-size:14px;">🚩 出發</strong>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;">
+          出發時間
+          <input type="datetime-local" step="1" id="depart-time" />
+        </label>
+        <button class="btn" id="depart-selected">出發勾選的組別</button>
+        <span style="font-size:12px;color:#888;">
+          出發時間不填＝按下去的當下；現場已經先出發、晚一點才登記時，可以填實際時間補登（不能是未來、不能早於 24 小時前）。
+          每組的耗時與逾時都從出發時間起算，出發後無法取消。
+        </span>
+      </div>
+      <div class="toolbar" style="align-items:center;background:#f4f6fb;padding:10px;border-radius:8px;">
+        <strong style="font-size:14px;">🏁 到站（B6 終點確認）</strong>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;">
+          到站時間
+          <input type="datetime-local" step="1" id="finish-time" />
+        </label>
+        <button class="btn" id="finish-selected">到站勾選的組別</button>
+        <span style="font-size:12px;color:#888;">
+          到站時間不填＝按下去的當下，可補登實際到站時間（不能早於該組出發時間）。會停止計時並依出發後是否超過 2 小時標註準時／逾時。
+          按錯的話，LINE 輸入「取消到站 X組」（只取消到站）或「退回 X組」（退一關）更正。
+        </span>
+      </div>
       <table>
         <thead>
-          <tr><th>組別</th><th>狀態</th><th>進度</th><th>經過時間</th><th>逾時</th><th>加分</th></tr>
+          <tr><th></th><th>組別</th><th>狀態</th><th>出發時間</th><th>到站時間</th><th>進度</th><th>經過時間</th><th>逾時</th><th>加分</th><th>操作</th></tr>
         </thead>
         <tbody id="progress-body"></tbody>
       </table>
@@ -184,7 +208,7 @@
         <strong>🚩 現場關主</strong>
         <table style="margin-top:10px;">
           <tbody>
-            <tr><td><code>出發 X組</code></td><td>開始計時，公布第一關</td></tr>
+            <tr><td><code>出發 X組</code></td><td>開始計時，公布第一關。後台「即時進度」分頁也有「🚩 出發」按鈕（可補登實際出發時間）</td></tr>
             <tr><td><code>我是 XX 關主</code>（例如「我是B3關主」）</td><td>自助登記為該關卡的關主，之後「通過 X組」只對這一關生效，且「出發」「通過」會自動推播通知您有隊伍正往這關來</td></tr>
             <tr><td><code>關主報到</code> → 回覆關卡代號或名稱</td><td>比較口語化的登記方式：先傳「關主報到」，系統提示後單獨回覆「B3」或「救救菜英文」都算數，效果跟「我是XX關主」一樣。只對不是隊伍成員的帳號生效，隊伍不會受影響</td></tr>
             <tr><td><code>通過 X組</code></td><td>確認目前這關已完成，解鎖下一關（僅對自己登記的那一關生效）</td></tr>
@@ -197,7 +221,7 @@
         <strong>🏁 B6 終點工作人員</strong>
         <table style="margin-top:10px;">
           <tbody>
-            <tr><td><code>到站 X組</code></td><td>隊伍實際抵達 B6，辦理終點確認、停止計時</td></tr>
+            <tr><td><code>到站 X組</code></td><td>隊伍實際抵達 B6，辦理終點確認、停止計時。後台「即時進度」分頁也有「🏁 到站」按鈕（可補登實際到站時間）</td></tr>
           </tbody>
         </table>
       </div>
@@ -219,7 +243,8 @@
         <table style="margin-top:10px;">
           <tbody>
             <tr><td><code>通過 X組</code></td><td>對任何關卡都能直接喊過，不受關主登記限制</td></tr>
-            <tr><td><code>退回 X組</code></td><td>更正「通過」／「到站」按錯或連按兩次的誤觸</td></tr>
+            <tr><td><code>退回 X組</code></td><td>每次都真的退一關（完成關卡數 -1）。已到站的組別會一併取消終點確認、清掉結束時間與逾時標記，例如 12/12 → 11/12，排行榜與查詢同步更新</td></tr>
+            <tr><td><code>取消到站 X組</code></td><td>只取消誤按的終點確認，完成關卡數不變（12/12 仍是 12/12）</td></tr>
             <tr><td><code>解除綁定 X組</code></td><td>清空單一組別的綁定與報到狀態</td></tr>
             <tr><td><code>確認換隊長 X組</code></td><td>核准組員的換隊長申請</td></tr>
             <tr><td><code>加分 X組 N</code>（可加理由）</td><td>任意時機、任意理由加分／扣分（N 可負數），影響排行榜排序</td></tr>
