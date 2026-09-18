@@ -207,7 +207,7 @@ function refereeHelpMsg(checkpointId = null, guide = false) {
 }
 
 function broadcasterHelpMsg(guide = false) {
-  return textMsg(
+  const message = textMsg(
     [
       guide ? "📖 使用說明｜總領隊" : "📖 總領隊可用指令",
       "• 出發 X組：現場宣布出發時，開始該組計時並公布第一關",
@@ -221,6 +221,15 @@ function broadcasterHelpMsg(guide = false) {
       "⚠️ 「所有人」會推給全部隊伍成員與關主，推播則數較多，請斟酌使用。",
     ].join("\n")
   );
+  // 訊息底下直接附按鈕，點一下就開始推播（聊天室下方的專屬選單也有同樣的按鈕）
+  message.quickReply = {
+    items: [
+      ["👑 推播隊長", "推播 隊長"],
+      ["🚩 推播關主", "推播 關主"],
+      ["👥 推播所有人", "推播 所有人"],
+    ].map(([label, text]) => ({ type: "action", action: { type: "message", label, text } })),
+  };
+  return message;
 }
 
 function adminHelpMsg() {
@@ -283,6 +292,13 @@ async function checkin(groupNo, userId) {
   if (!getAllGroupNos().includes(groupNo)) {
     return [textMsg(`⚠️ 第 ${groupNo} 組不存在，請確認組別編號是否正確（1～${getAllGroupNos().length}）。`)];
   }
+  const result = await checkinInTransaction(groupNo, userId);
+  // 報到成功就套用小隊專屬選單（交易已提交才查得到；沒報到成功的不需要動選單）
+  void syncRoleMenu(userId, { skipIfNone: true });
+  return result;
+}
+
+async function checkinInTransaction(groupNo, userId) {
   return transaction(async (tx) => {
     const existing = await findMembership(tx, userId);
     if (existing) {
@@ -680,6 +696,7 @@ async function tryRegisterReferee(userId, checkpointId, { self = false } = {}) {
      ON CONFLICT (user_id) DO UPDATE SET checkpoint_id = excluded.checkpoint_id, registered_at = excluded.registered_at`,
     [userId, checkpointId, nowIso()]
   );
+  void syncRoleMenu(userId);
   return { ok: true, cp };
 }
 
@@ -716,6 +733,7 @@ async function removeReferee(userId) {
   const row = await db.get("SELECT checkpoint_id FROM referees WHERE user_id = ?", [userId]);
   if (!row) return { ok: false, error: "這個帳號目前不是關主" };
   await db.run("DELETE FROM referees WHERE user_id = ?", [userId]);
+  void syncRoleMenu(userId);
   return {
     ok: true,
     message: `已取消 ${row.checkpoint_id} 關主`,
@@ -755,7 +773,9 @@ async function getRefereeCheckpoint(userId) {
 // 小編專用：清空所有關主登記（跟「重置遊戲」分開，不會因為重置整場遊戲而被順便清掉，
 // 需要的時候才手動清，例如發現有人誤登記、或活動結束後要收回名單）
 async function resetReferees() {
+  const affected = (await db.all("SELECT user_id FROM referees")).map((r) => r.user_id);
   await db.run("DELETE FROM referees");
+  void syncRoleMenus(affected);
   return [textMsg("♻️ 已清空所有關主登記，需要的人請重新輸入「我是 XX 關主」登記。")];
 }
 
@@ -806,6 +826,7 @@ async function tryRegisterBroadcaster(userId, { self = false } = {}) {
      ON CONFLICT (user_id) DO UPDATE SET registered_at = excluded.registered_at`,
     [userId, nowIso()]
   );
+  void syncRoleMenu(userId);
   return { ok: true };
 }
 
@@ -830,6 +851,7 @@ async function removeBroadcaster(userId) {
   const row = await db.get("SELECT user_id FROM broadcasters WHERE user_id = ?", [userId]);
   if (!row) return { ok: false, error: "這個帳號目前不是總領隊" };
   await db.run("DELETE FROM broadcasters WHERE user_id = ?", [userId]);
+  void syncRoleMenu(userId);
   return {
     ok: true,
     message: "已取消總領隊",
@@ -844,7 +866,9 @@ async function isBroadcaster(userId) {
 
 // 小編專用：清空所有總領隊登記（跟「重置關主」同樣的設計，不會因為重置整場遊戲而被順便清掉）
 async function resetBroadcasters() {
+  const affected = (await db.all("SELECT user_id FROM broadcasters")).map((r) => r.user_id);
   await db.run("DELETE FROM broadcasters");
+  void syncRoleMenus(affected);
   return [textMsg("♻️ 已清空所有總領隊登記。")];
 }
 
@@ -1264,6 +1288,13 @@ async function confirmLeaderTransfer(groupNo) {
 // ---- 七、誤綁組別修正 ----
 
 async function unbindGroup(groupNo) {
+  const memberIds = await getGroupMemberIds(groupNo);
+  const result = await unbindGroupInTransaction(groupNo);
+  void syncRoleMenus(memberIds); // 解除綁定的人換回預設選單（有「報到」按鈕）
+  return result;
+}
+
+async function unbindGroupInTransaction(groupNo) {
   return transaction(async (tx) => {
     await tx.run("DELETE FROM team_members WHERE group_no = ?", [groupNo]);
     await tx.run("DELETE FROM checkpoint_log WHERE group_no = ?", [groupNo]);
@@ -1327,6 +1358,46 @@ async function listBonusLog() {
 
 const EMERGENCY_REPEAT_WINDOW_MS = 60 * 1000; // 同一個人 60 秒內重複按，不再重複推播，避免洗版
 const EMERGENCY_MERGE_WINDOW_MS = 30 * 60 * 1000; // 30 分鐘內還沒處理的，後續補充都算同一件
+
+// 個人專屬圖文選單：身分（小隊／關主／總領隊／小編）改變時通知外層去換選單。
+// 跟 profileResolver 一樣由 src/index.js 啟動時注入（teamService 不碰 LINE API，測試也不會打到網路）。
+let roleMenuHook = null;
+function setRoleMenuHook(fn) {
+  roleMenuHook = fn;
+}
+
+// 這個人目前該用哪一套選單（優先順序：小編 > 總領隊 > 關主 > 小隊），都不是回傳 null＝預設選單
+async function menuRoleOf(userId) {
+  if (getAdminIds().includes(userId)) return "admin";
+  if (await isBroadcaster(userId)) return "broadcaster";
+  if (await getRefereeCheckpoint(userId)) return "referee";
+  if (await findMembership(db, userId)) return "team";
+  return null;
+}
+
+// 身分改變後呼叫：重新判斷該用哪套選單並通知外層。背景執行、失敗只記 log，不影響指令回覆。
+function syncRoleMenu(userId, { skipIfNone = false } = {}) {
+  if (!roleMenuHook) return Promise.resolve();
+  return menuRoleOf(userId)
+    .then((role) => (role === null && skipIfNone ? undefined : roleMenuHook(userId, role)))
+    .catch((err) => console.error(`套用 ${userId.slice(-6)} 的專屬選單失敗（不影響指令）：`, err.message || err));
+}
+
+// 全部重新套用一次：重新上傳選單、或伺服器重啟後用。所有隊伍成員、關主、總領隊、小編都會確認選單是對的。
+async function syncAllRoleMenus() {
+  if (roleMenuHook && roleMenuHook.refresh) await roleMenuHook.refresh();
+  const rows = await db.all(
+    `SELECT user_id FROM team_members UNION SELECT user_id FROM referees UNION SELECT user_id FROM broadcasters`
+  );
+  const ids = new Set([...rows.map((r) => r.user_id), ...getAdminIds()]);
+  for (const id of ids) await syncRoleMenu(id, { skipIfNone: true });
+  return ids.size;
+}
+
+// 批次（重置／解除綁定）：先記下受影響的人，資料改完再逐一同步
+async function syncRoleMenus(userIds) {
+  for (const id of userIds) await syncRoleMenu(id);
+}
 
 // 查 LINE 顯示名稱用：由 src/index.js 啟動時注入（teamService 本身不碰 LINE API，測試也不會打到網路）
 let profileResolver = null;
@@ -1571,6 +1642,13 @@ async function countOpenEmergencies() {
 // ---- 八、重置整場遊戲（小編用，非文件原始條款，供活動前彩排／正式開賽前重置）----
 
 async function resetGame() {
+  const memberIds = (await db.all("SELECT user_id FROM team_members")).map((r) => r.user_id);
+  const result = await resetGameInTransaction();
+  void syncRoleMenus(memberIds); // 所有隊伍成員換回預設選單
+  return result;
+}
+
+async function resetGameInTransaction() {
   return transaction(async (tx) => {
     await tx.run("DELETE FROM checkpoint_log");
     await tx.run("DELETE FROM leader_transfer_requests");
@@ -1879,6 +1957,11 @@ module.exports = {
   listEmergencies,
   countOpenEmergencies,
   setProfileResolver,
+  setRoleMenuHook,
+  syncRoleMenu,
+  syncRoleMenus,
+  syncAllRoleMenus,
+  menuRoleOf,
   resetGame,
   queryCurrentCheckpoint,
   queryProgress,

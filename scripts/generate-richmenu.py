@@ -7,12 +7,13 @@
     python3 scripts/generate-richmenu.py
 """
 from PIL import Image, ImageDraw, ImageFont
+import json
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LOGO_PATH = os.path.join(ROOT, "assets", "brand", "logo.jpg")
-OUT_PATH = os.path.join(ROOT, "assets", "richmenu.png")
+LAYOUT_PATH = os.path.join(HERE, "richmenus.json")
 
 W, H = 2500, 1686
 HEADER_H = 258  # 與 setup-rich-menu.js 一致：(1686 - 258) / 3 = 476
@@ -32,7 +33,8 @@ def font(size):
     return ImageFont.truetype(FONT_PATH, size, index=0)
 
 
-def main():
+def render(menu):
+    out_path = os.path.join(ROOT, "assets", menu["image"])
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
@@ -52,7 +54,7 @@ def main():
     tw = tb[2] - tb[0]
     title_x = W - tw - 90
     draw.text((title_x, 55), title_text, font=title_font, fill=GREEN_DARK)
-    sub_text = "溪頭闖關系統"
+    sub_text = menu["subtitle"]
     sb = draw.textbbox((0, 0), sub_text, font=subtitle_font)
     draw.text((W - (sb[2] - sb[0]) - 90, 165), sub_text, font=subtitle_font, fill=NAVY)
 
@@ -69,23 +71,15 @@ def main():
             radius=36, fill=fill, outline=outline, width=4,
         )
 
-    # (col, row, 按鈕文字＝實際會送出的指令內容, 說明文字)
-    # 最後一顆是緊急聯絡，用紅色底跟其他按鈕明顯區隔
-    tiles = [
-        (0, 0, "目前關卡", "查詢這一關在哪裡", False),
-        (1, 0, "闖關進度", "已完成幾關、耗時多久", False),
-        (0, 1, "排行榜", "看看目前排名", False),
-        (1, 1, "報到", "第一次使用，從這裡開始", False),
-        (0, 2, "使用說明", "依您的身分列出可用指令", False),
-        (1, 2, "緊急聯絡", "受傷、迷路、危險，立刻通知小編", True),
-    ]
+    tiles = menu["tiles"]
 
     label_font = font(88)
     desc_font = font(42)
 
-    for col, row, label, desc, urgent in tiles:
-        x0, y0 = col * col_w, grid_top + row * row_h
-        x1, y1 = x0 + col_w, y0 + row_h
+    for tile in tiles:
+        label, desc, urgent = tile["label"], tile["desc"], tile.get("urgent", False)
+        x0, y0 = tile["col"] * col_w, grid_top + tile["row"] * row_h
+        x1, y1 = x0 + col_w * tile.get("colspan", 1), y0 + row_h
         if urgent:
             rounded_tile(x0, y0, x1, y1, fill=EMERGENCY_TILE, outline=EMERGENCY_DARK)
         else:
@@ -102,8 +96,15 @@ def main():
         dw, dh = db[2] - db[0], db[3] - db[1]
         draw.text((cx - dw / 2, cy + lh / 2 + 10), desc, font=desc_font, fill=desc_color)
 
-    img.save(OUT_PATH)
-    print(f"已產生 {OUT_PATH}（{img.size[0]}x{img.size[1]}）")
+    img.save(out_path)
+    print(f"已產生 {out_path}（{img.size[0]}x{img.size[1]}）")
+
+
+def main():
+    with open(LAYOUT_PATH, encoding="utf-8") as f:
+        menus = json.load(f)["menus"]
+    for menu in menus:
+        render(menu)
 
 
 if __name__ == "__main__":

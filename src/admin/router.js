@@ -502,6 +502,16 @@ router.delete("/api/broadcasters/:userId", (req, res, next) =>
   roleChange(res, next, () => teamService.removeBroadcaster(req.params.userId))
 );
 
+// 重新套用所有人的專屬選單（重新執行 setup-rich-menu.js 上傳選單之後按一次）
+router.post("/api/sync-role-menus", async (req, res, next) => {
+  try {
+    const count = await teamService.syncAllRoleMenus();
+    res.json({ ok: true, count });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---- 加好友歡迎詞 ----
 
 router.get("/api/welcome-message", (req, res) => {

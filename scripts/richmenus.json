@@ -1,0 +1,247 @@
+{
+  "_說明": "圖文選單版型：產生圖片的 generate-richmenu.py、上傳到 LINE 的 setup-rich-menu.js、以及執行時套用個人選單的 src/roleMenus.js 共用這份，避免圖片、點擊區與程式對不上。text 是按下去實際送出的文字；colspan 預設 1（一列兩格，2 表示整列一格）。key=default 是所有人的預設選單，team／referee／broadcaster／admin 是綁定身分後自動套用在個人身上的專屬選單（優先順序：小編 > 總領隊 > 關主 > 小隊），取消綁定會換回預設。name 是 LINE 上的選單名稱，程式靠名稱找選單，改名要一起改。",
+  "menus": [
+    {
+      "key": "default",
+      "name": "溪頭闖關系統選單",
+      "image": "richmenu.png",
+      "subtitle": "溪頭闖關系統",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "label": "目前關卡",
+          "desc": "查詢這一關在哪裡",
+          "text": "目前關卡"
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "label": "闖關進度",
+          "desc": "已完成幾關、耗時多久",
+          "text": "闖關進度"
+        },
+        {
+          "col": 0,
+          "row": 1,
+          "label": "排行榜",
+          "desc": "看看目前排名",
+          "text": "排行榜"
+        },
+        {
+          "col": 1,
+          "row": 1,
+          "label": "報到",
+          "desc": "第一次使用，從這裡開始",
+          "text": "報到"
+        },
+        {
+          "col": 0,
+          "row": 2,
+          "label": "使用說明",
+          "desc": "依您的身分列出可用指令",
+          "text": "使用說明"
+        },
+        {
+          "col": 1,
+          "row": 2,
+          "label": "緊急聯絡",
+          "desc": "受傷、迷路、危險，立刻通知小編",
+          "text": "緊急聯絡",
+          "urgent": true
+        }
+      ]
+    },
+    {
+      "key": "team",
+      "name": "小隊選單",
+      "image": "richmenu-team.png",
+      "subtitle": "闖關隊伍專用",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "label": "目前關卡",
+          "desc": "查詢這一關在哪裡",
+          "text": "目前關卡"
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "label": "闖關進度",
+          "desc": "已完成幾關、耗時多久",
+          "text": "闖關進度"
+        },
+        {
+          "col": 0,
+          "row": 1,
+          "label": "排行榜",
+          "desc": "看看目前排名",
+          "text": "排行榜"
+        },
+        {
+          "col": 1,
+          "row": 1,
+          "label": "使用說明",
+          "desc": "列出隊伍可用指令",
+          "text": "使用說明"
+        },
+        {
+          "col": 0,
+          "row": 2,
+          "colspan": 2,
+          "label": "緊急聯絡",
+          "desc": "受傷、迷路、危險，立刻通知小編",
+          "text": "緊急聯絡",
+          "urgent": true
+        }
+      ]
+    },
+    {
+      "key": "broadcaster",
+      "name": "總領隊選單",
+      "image": "richmenu-broadcaster.png",
+      "subtitle": "總領隊專用",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "label": "推播隊長",
+          "desc": "點一下，再輸入內容",
+          "text": "推播 隊長"
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "label": "推播關主",
+          "desc": "點一下，再輸入內容",
+          "text": "推播 關主"
+        },
+        {
+          "col": 0,
+          "row": 1,
+          "label": "推播所有人",
+          "desc": "隊員與關主全部收到",
+          "text": "推播 所有人"
+        },
+        {
+          "col": 1,
+          "row": 1,
+          "label": "使用說明",
+          "desc": "列出總領隊可用指令",
+          "text": "使用說明"
+        },
+        {
+          "col": 0,
+          "row": 2,
+          "label": "我的ID",
+          "desc": "查詢自己的 userId",
+          "text": "我的ID"
+        },
+        {
+          "col": 1,
+          "row": 2,
+          "label": "緊急聯絡",
+          "desc": "遇到危險，立刻通知小編",
+          "text": "緊急聯絡",
+          "urgent": true
+        }
+      ]
+    },
+    {
+      "key": "referee",
+      "name": "關主選單",
+      "image": "richmenu-referee.png",
+      "subtitle": "關主專用",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "label": "進度",
+          "desc": "各組來訪順序與目前狀態",
+          "text": "進度"
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "label": "使用說明",
+          "desc": "列出關主可用指令",
+          "text": "使用說明"
+        },
+        {
+          "col": 0,
+          "row": 1,
+          "label": "我的ID",
+          "desc": "查詢自己的 userId",
+          "text": "我的ID"
+        },
+        {
+          "col": 1,
+          "row": 1,
+          "label": "換負責關卡",
+          "desc": "重新登記其他關卡",
+          "text": "關主報到"
+        },
+        {
+          "col": 0,
+          "row": 2,
+          "colspan": 2,
+          "label": "緊急聯絡",
+          "desc": "遇到危險，立刻通知小編",
+          "text": "緊急聯絡",
+          "urgent": true
+        }
+      ]
+    },
+    {
+      "key": "admin",
+      "name": "小編選單",
+      "image": "richmenu-admin.png",
+      "subtitle": "小編專用",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "label": "進度",
+          "desc": "所有組別目前狀態",
+          "text": "進度"
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "label": "推播",
+          "desc": "點按鈕選對象再輸入內容",
+          "text": "推播"
+        },
+        {
+          "col": 0,
+          "row": 1,
+          "label": "排行榜",
+          "desc": "看目前排名",
+          "text": "排行榜"
+        },
+        {
+          "col": 1,
+          "row": 1,
+          "label": "使用說明",
+          "desc": "列出小編可用指令",
+          "text": "使用說明"
+        },
+        {
+          "col": 0,
+          "row": 2,
+          "label": "排行榜開啟",
+          "desc": "開放隊伍查詢",
+          "text": "排行榜開啟"
+        },
+        {
+          "col": 1,
+          "row": 2,
+          "label": "排行榜關閉",
+          "desc": "僅小編可查",
+          "text": "排行榜關閉"
+        }
+      ]
+    }
+  ]
+}

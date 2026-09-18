@@ -12,11 +12,29 @@ const configStore = require("./config/configStore");
 const imageStore = require("./config/imageStore");
 const lineUserStore = require("./config/lineUserStore");
 const mediaRetry = require("./mediaRetry");
+const { createRoleMenus } = require("./roleMenus");
 const adminRouter = require("./admin/router");
 
 const app = express();
 
 teamService.setProfileResolver(lineClient.getDisplayName);
+
+// 個人專屬圖文選單：身分改變（報到、綁定關主／總領隊、取消、重置）時換選單，見 src/roleMenus.js
+const roleMenus = createRoleMenus(lineClient.client);
+const applyRoleMenu = (userId, role) => roleMenus.apply(userId, role);
+applyRoleMenu.refresh = () => roleMenus.refresh();
+teamService.setRoleMenuHook(applyRoleMenu);
+
+// 已經有身分的人傳訊息時，順便確認他的選單是對的（伺服器重啟、重新上傳選單後會自己補套用）；
+// 每個人最多每 10 分鐘確認一次，避免每則訊息都查資料庫
+const ROLE_MENU_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+const roleMenuCheckedAt = new Map();
+function ensureRoleMenu(userId) {
+  const last = roleMenuCheckedAt.get(userId);
+  if (last && Date.now() - last < ROLE_MENU_CHECK_INTERVAL_MS) return;
+  roleMenuCheckedAt.set(userId, Date.now());
+  teamService.syncRoleMenu(userId, { skipIfNone: true });
+}
 
 // 關卡圖片：/maps/A2.jpg ...
 // 後台網頁上傳的圖片存在資料庫（見 imageStore.js），先查資料庫，查不到再 fallback
@@ -92,7 +110,10 @@ async function backfillLineUsers() {
 // 實際文字內容存在資料庫、可在後台網頁編輯（見 configStore.getWelcomeMessage／setWelcomeMessage）。
 async function handleEvent(event) {
   try {
-    if (event.source && event.source.userId) recordLineUser(event.source.userId);
+    if (event.source && event.source.userId) {
+      recordLineUser(event.source.userId);
+      ensureRoleMenu(event.source.userId);
+    }
 
     if (event.type === "follow") {
       console.log(`收到加入好友事件：userId=${event.source && event.source.userId}`);
@@ -180,6 +201,10 @@ db.init()
       mediaRetry
         .resumePending(lineClient.getMessageContent)
         .catch((err) => console.error("接續重試審核媒體下載失敗：", err));
+      teamService
+        .syncAllRoleMenus()
+        .then((n) => console.log(`已確認 ${n} 位使用者的專屬選單`))
+        .catch((err) => console.error("同步專屬選單失敗（選單可能還沒上傳，不影響其他功能）：", err.message || err));
       backfillLineUsers().catch((err) => console.error("補登 LINE 使用者名單失敗：", err));
     });
   })

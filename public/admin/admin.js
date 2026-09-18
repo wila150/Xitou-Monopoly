@@ -557,6 +557,17 @@ async function loadReferees() {
   await Promise.all([fillUserSelect("assign-referee-user"), fillCheckpointSelect()]).catch(() => {});
 }
 document.getElementById("refresh-referees").addEventListener("click", loadReferees);
+document.getElementById("sync-role-menus").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  try {
+    const { count } = await api("/api/sync-role-menus", { method: "POST" });
+    showMsg(refereesMsg, `已確認 ${count} 位使用者（隊伍成員、關主、總領隊、小編）的專屬選單。`, false);
+  } catch (err) {
+    showMsg(refereesMsg, err.message, true);
+  } finally {
+    e.target.disabled = false;
+  }
+});
 document.getElementById("assign-referee").addEventListener("click", async () => {
   const userId = document.getElementById("assign-referee-user").value;
   const checkpointId = document.getElementById("assign-referee-cp").value;
