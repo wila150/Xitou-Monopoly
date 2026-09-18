@@ -113,6 +113,7 @@
             <tr><td><code>使用說明</code></td><td>靜態說明文字</td></tr>
             <tr><td><code>排行榜</code></td><td>小編開啟後任何人可查詢</td></tr>
             <tr><td><code>接任隊長 X組</code></td><td>組員發起換隊長申請（需小編核准）</td></tr>
+            <tr><td><code>我的ID</code></td><td>回覆自己的 LINE userId（任何人都能查自己的）</td></tr>
           </tbody>
         </table>
       </div>
@@ -164,6 +165,10 @@
             <tr><td><code>重置遊戲</code> → <code>重置遊戲 確認</code></td><td>清空所有組別報到／進度／紀錄（不影響關主／總領隊登記），需兩步驟確認</td></tr>
           </tbody>
         </table>
+        <p style="font-size:12.5px;color:#888;margin-top:8px;">
+          小編名單（<code>ADMIN_USER_IDS</code>）不是在這裡設定，而是在 Render 環境變數裡用逗號分隔多個 userId。
+          要拿到某人的 userId，請他傳「我的ID」給機器人，把回覆的那串貼進 <code>ADMIN_USER_IDS</code> 後重新部署即可生效。
+        </p>
       </div>
     </section>
   </main>

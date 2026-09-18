@@ -76,6 +76,11 @@ async function route(userId, rawText) {
   let m;
   let groupNo;
 
+  if (text === "我的ID" || text === "我的id" || text === "我的Id") {
+    // 查詢自己的 LINE userId，方便小編設定 ADMIN_USER_IDS 或關主／總領隊排查問題用，任何人都可以查自己的
+    return withReply([teamService.textMsg(`您的 userId：\n${userId}`)]);
+  }
+
   if (text === "報到") {
     // 圖文選單「報到」按鈕會送出這個固定文字（組別編號因人而異，選單按鈕沒辦法直接帶號碼）
     return withReply([

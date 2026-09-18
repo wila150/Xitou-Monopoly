@@ -94,6 +94,12 @@ test("報到：點圖文選單「報到」按鈕後會提示回覆組別，之�
   assert.equal((await teamService.findMembership("Umember2")).group_no, 10);
 });
 
+test("我的ID：任何人都能查自己的 userId，不需要報到或任何身分", async () => {
+  await resetGame();
+  const result = await commandRouter.route("UsomeRandomPerson", "我的ID");
+  assert.match(textsOf(result)[0], /UsomeRandomPerson/);
+});
+
 test("出發：未報到組別無法出發，成功後廣播第一關", async () => {
   await resetGame();
   const noTeam = await commandRouter.route(ADMIN, "出發 9組");
