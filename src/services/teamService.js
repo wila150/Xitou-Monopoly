@@ -1,5 +1,5 @@
 const { db, transaction } = require("../db");
-const { getCheckpoint } = require("../config/checkpoints");
+const { getCheckpoint, getAllCheckpoints } = require("../config/checkpoints");
 const { getRoute, getAllGroupNos } = require("../config/teamsRoute");
 const { getAdminIds } = require("../config/admins");
 const configStore = require("../config/configStore");
@@ -509,6 +509,28 @@ async function registerReferee(userId, checkpointId) {
       `✅ 已登記為「${cp.name}」（${cp.id}）的關主。之後隊伍在這一關完成任務後，直接輸入「通過 X組」即可為該組解鎖下一關。`
     ),
   ];
+}
+
+// 用關卡代號（例如 B3）或關卡名稱（例如 救救菜英文）找關卡，代號不分大小寫，找不到回傳 null
+function findCheckpointByIdOrName(text) {
+  const normalized = text.trim();
+  if (!normalized) return null;
+  return (
+    getAllCheckpoints().find(
+      (cp) => cp.id.toLowerCase() === normalized.toLowerCase() || cp.name === normalized
+    ) || null
+  );
+}
+
+// 關主也能像隊伍報到一樣，單獨回覆關卡代號或名稱就完成登記（不用一定要打「我是 XX 關主」）。
+// 只有「目前不是任何隊伍成員」的帳號才會走這條路徑，回傳 null 表示不適用（例如已經是隊伍成員，
+// 這種情況下該讓文字繼續走關鍵字比對流程，不要被誤判成要登記關主）。
+async function tryRefereeBareRegistration(userId, text) {
+  const membership = await findMembership(db, userId);
+  if (membership) return null;
+  const cp = findCheckpointByIdOrName(text);
+  if (!cp) return null;
+  return registerReferee(userId, cp.id);
 }
 
 async function getRefereeCheckpoint(userId) {
@@ -1119,6 +1141,7 @@ module.exports = {
   listPendingSubmissions,
   approveSubmissionById,
   registerReferee,
+  tryRefereeBareRegistration,
   getRefereeCheckpoint,
   resetReferees,
   listReferees,

@@ -648,6 +648,32 @@ test("逾時判斷是看「出發後經過多久」，不是比對當天固定�
   assert.equal((await teamService.findTeam(2)).is_late, 1);
 });
 
+test("關主報到流程：輸入「關主報到」提示後，單獨回覆關卡代號或名稱都能完成登記", async () => {
+  await resetGame();
+  const prompt = await commandRouter.route(STAFF, "關主報到");
+  assert.match(textsOf(prompt)[0], /請回覆您負責的關卡代號或名稱/);
+
+  const byCode = await commandRouter.route(STAFF, "b3");
+  assert.match(textsOf(byCode)[0], /已登記為「救救菜英文」（B3）的關主/);
+  assert.equal(await teamService.getRefereeCheckpoint(STAFF), "B3");
+
+  const byName = await commandRouter.route("Uother", "救救菜英文");
+  assert.match(textsOf(byName)[0], /已登記為「救救菜英文」（B3）的關主/);
+  assert.equal(await teamService.getRefereeCheckpoint("Uother"), "B3");
+});
+
+test("關主報到流程：已經報到綁定隊伍的帳號不受影響，單獨打出跟關卡同名的字仍走關鍵字比對", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+
+  // 第1組目前在 D5（photo 類型），這個帳號已經是隊伍成員，打「B3」應該繼續走原本的關卡型態提示，
+  // 不會被誤判成要登記關主
+  const result = await commandRouter.route("Uleader", "B3");
+  assert.match(textsOf(result)[0], /請直接上傳/);
+  assert.equal(await teamService.getRefereeCheckpoint("Uleader"), null);
+});
+
 test("關主自助登記：「我是 B3 關主」後可以用通過，但只對自己登記的那一關生效", async () => {
   await resetGame();
   await commandRouter.route("Uleader", "報到 1組");

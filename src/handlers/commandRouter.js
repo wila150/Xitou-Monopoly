@@ -90,6 +90,15 @@ async function route(userId, rawText) {
     ]);
   }
 
+  if (text === "關主報到" || text === "報到 關主" || text === "報到關主") {
+    // 關主專用入口：跟隊伍「報到」對應，提示之後單獨回覆關卡代號或名稱即可完成登記
+    return withReply([
+      teamService.textMsg(
+        "🚩 請回覆您負責的關卡代號或名稱完成登記，例如「B3」或「救救菜英文」。"
+      ),
+    ]);
+  }
+
   if ((groupNo = matchGroupNo(text, CHECKIN_RE)) != null) {
     return withReply(await teamService.checkin(groupNo, userId));
   }
@@ -291,6 +300,13 @@ async function route(userId, rawText) {
     if (!isAdmin(userId)) return adminOnlyDenied();
     await teamService.setRankingPublic(false);
     return withReply([teamService.textMsg("🔒 已關閉排行榜公開查詢，僅小編可查詢。")]);
+  }
+
+  // 關主也可以直接單獨回覆關卡代號或名稱完成登記（跟隊伍單獨回覆組別報到一致），
+  // 只對「不是任何隊伍成員」的帳號生效，已報到綁定隊伍的人不受影響、繼續往下走關鍵字比對。
+  const bareReferee = await teamService.tryRefereeBareRegistration(userId, text);
+  if (bareReferee) {
+    return withReply(bareReferee);
   }
 
   // 以上皆非固定指令 -> 視為關卡關鍵字嘗試（有現場關主的 6 關）
