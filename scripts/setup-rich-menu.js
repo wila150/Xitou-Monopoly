@@ -20,9 +20,9 @@ const IMAGE_PATH = path.join(__dirname, "..", "assets", "richmenu.png");
 
 const W = 2500;
 const H = 1686;
-const HEADER_H = 260;
+const HEADER_H = 258; // (1686 - 258) / 3 = 476，三列高度才是整數（LINE 要求點擊區座標為整數）
 const COL_W = W / 2; // 1250
-const ROW_H = (H - HEADER_H) / 2; // 713
+const ROW_H = (H - HEADER_H) / 3; // 2 欄 x 3 列，每列 476
 
 function messageArea(x, y, w, h, text) {
   return { bounds: { x, y, width: w, height: h }, action: { type: "message", text } };
@@ -38,6 +38,8 @@ const richMenuRequest = {
     messageArea(COL_W, HEADER_H, COL_W, ROW_H, "闖關進度"),
     messageArea(0, HEADER_H + ROW_H, COL_W, ROW_H, "排行榜"),
     messageArea(COL_W, HEADER_H + ROW_H, COL_W, ROW_H, "報到"),
+    messageArea(0, HEADER_H + ROW_H * 2, COL_W, ROW_H, "使用說明"),
+    messageArea(COL_W, HEADER_H + ROW_H * 2, COL_W, ROW_H, "緊急聯絡"),
   ],
 };
 

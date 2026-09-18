@@ -19,6 +19,7 @@
     <button class="tab-btn" data-tab="referees">關主名單</button>
     <button class="tab-btn" data-tab="leaders">小隊長名單</button>
     <button class="tab-btn" data-tab="broadcasters">總領隊名單</button>
+    <button class="tab-btn" data-tab="emergencies">🚨 緊急聯絡</button>
     <button class="tab-btn" data-tab="submissions">照片／影片審核</button>
     <button class="tab-btn" data-tab="bonus-log">加分紀錄</button>
     <button class="tab-btn" data-tab="welcome">加好友歡迎詞</button>
@@ -104,6 +105,19 @@
       </table>
     </section>
 
+    <!-- 緊急聯絡 -->
+    <section class="panel" id="panel-emergencies">
+      <div class="toolbar">
+        <button class="btn secondary" id="refresh-emergencies">🔄 重新整理</button>
+      </div>
+      <div class="msg" id="emergencies-msg"></div>
+      <p style="font-size:13px;color:#666;">
+        任何人在 LINE 傳「緊急聯絡」（圖文選單也有按鈕）都會出現在這裡，同時 LINE 會立刻推播給所有小編。
+        按「✅ 已處理」會通知回報者「小編已收到並處理中」，也會告知其他小編已有人接手。此頁每 5 秒自動更新，未處理的排最上面。
+      </p>
+      <div class="card-list" id="emergencies-list"></div>
+    </section>
+
     <!-- 照片／影片審核佇列 -->
     <section class="panel" id="panel-submissions">
       <div class="toolbar">
@@ -161,6 +175,7 @@
             <tr><td><code>排行榜</code></td><td>小編開啟後任何人可查詢</td></tr>
             <tr><td><code>接任隊長 X組</code></td><td>組員發起換隊長申請（需小編核准）</td></tr>
             <tr><td><code>我的ID</code></td><td>回覆自己的 LINE userId（任何人都能查自己的）</td></tr>
+            <tr><td><code>緊急聯絡</code>（或「緊急求助」）</td><td>任何人都能用（隊員、關主、總領隊、還沒報到的也行）：立刻推播給所有小編，附上身分、組別與目前關卡；後面可接說明，例如「緊急聯絡 有人扭傷腳踝」。60 秒內重複按不會洗版，之後補充的說明會併入同一件。圖文選單也有這顆按鈕</td></tr>
           </tbody>
         </table>
       </div>
@@ -208,6 +223,7 @@
             <tr><td><code>解除綁定 X組</code></td><td>清空單一組別的綁定與報到狀態</td></tr>
             <tr><td><code>確認換隊長 X組</code></td><td>核准組員的換隊長申請</td></tr>
             <tr><td><code>加分 X組 N</code>（可加理由）</td><td>任意時機、任意理由加分／扣分（N 可負數），影響排行榜排序</td></tr>
+            <tr><td><code>處理緊急 N</code></td><td>接手處理緊急聯絡 #N，會通知回報者與其他小編。收到警報時直接點訊息底下的「🙋 我來處理」按鈕即可，不用打字；後台「緊急聯絡」分頁也有同樣功能</td></tr>
             <tr><td><code>遊戲結束</code></td><td>提前停止受理新關卡進度，不影響終點確認</td></tr>
             <tr><td><code>進度</code></td><td>列出所有組別目前狀態</td></tr>
             <tr><td><code>排行榜開啟</code> / <code>排行榜關閉</code></td><td>控制排行榜是否公開查詢</td></tr>

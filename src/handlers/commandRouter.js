@@ -60,6 +60,10 @@ const BROADCAST_TARGET_PATTERN = Object.keys(BROADCAST_TARGET_ALIASES).join("|")
 const BROADCAST_TARGET_ONLY_RE = new RegExp(`^(${BROADCAST_TARGET_PATTERN})$`);
 const BROADCAST_TARGET_WITH_CONTENT_RE = new RegExp(`^(${BROADCAST_TARGET_PATTERN})\\s+([\\s\\S]+)$`);
 const PENDING_BROADCAST_TTL_MS = 3 * 60 * 1000;
+// 緊急聯絡：「緊急聯絡」「緊急求助」，後面可接說明（有沒有空白或冒號都行），任何人都能用
+const EMERGENCY_RE = /^(?:緊急聯絡|緊急求助)(?:[\s:：]+([\s\S]+))?$/;
+// 小編接手：「處理緊急 3」「處理緊急 #3」，LINE 警報訊息底下的「我來處理」按鈕會送出這句
+const HANDLE_EMERGENCY_RE = /^處理緊急\s*#?\s*([0-9]+)$/;
 const TRANSFER_REQUEST_RE = verbGroupRegex("接任隊長");
 const TRANSFER_CONFIRM_RE = verbGroupRegex("確認換隊長");
 const UNBIND_RE = verbGroupRegex("解除綁定");
@@ -151,6 +155,14 @@ async function route(userId, rawText) {
 
   let m;
   let groupNo;
+
+  // 緊急聯絡優先於所有對話狀態：就算正在「推播」兩步驟中，也要立刻送出，不能被吃掉
+  m = text.match(EMERGENCY_RE);
+  if (m) {
+    pendingBroadcasts.delete(userId);
+    const result = await teamService.reportEmergency(userId, m[1] || "");
+    return { reply: result.reply, groupBroadcasts: [], directPushes: result.directPushes };
+  }
 
   const pending = pendingBroadcasts.get(userId);
   if (pending) {
@@ -351,6 +363,13 @@ async function route(userId, rawText) {
         "⚠️ 此操作將清空所有隊伍的報到、進度與紀錄，且無法復原。\n如確定要重置，請輸入「重置遊戲 確認」。"
       ),
     ]);
+  }
+
+  m = text.match(HANDLE_EMERGENCY_RE);
+  if (m) {
+    if (!isAdmin(userId)) return adminOnlyDenied();
+    const result = await teamService.handleEmergency(Number(m[1]), userId);
+    return { reply: result.reply, groupBroadcasts: [], directPushes: result.directPushes };
   }
 
   if (text === "使用說明") {

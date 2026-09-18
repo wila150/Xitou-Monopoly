@@ -20,6 +20,12 @@ async function getMessageContent(messageId) {
   return Buffer.concat(chunks);
 }
 
+// 查使用者的 LINE 顯示名稱（緊急聯絡通知小編時附上，比一串 userId 好認）
+async function getDisplayName(userId) {
+  const profile = await client.getProfile(userId);
+  return profile.displayName;
+}
+
 // LINE 一次 reply/push 最多 5 則訊息
 function chunk(messages, size = 5) {
   const out = [];
@@ -53,4 +59,12 @@ async function pushToMany(userIds, messages) {
   await Promise.all(userIds.map((userId) => push(userId, messages)));
 }
 
-module.exports = { client, webhookMiddleware, reply, push, pushToMany, getMessageContent };
+module.exports = {
+  client,
+  webhookMiddleware,
+  reply,
+  push,
+  pushToMany,
+  getMessageContent,
+  getDisplayName,
+};

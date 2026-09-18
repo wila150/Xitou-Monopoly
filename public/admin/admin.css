@@ -47,6 +47,14 @@ nav button.active {
   font-weight: 600;
 }
 
+/* 有未處理的緊急聯絡時，分頁標籤變紅並閃爍，提醒小編切過去處理 */
+nav button.alert {
+  color: #c0392b;
+  font-weight: 700;
+  animation: alert-blink 1.2s ease-in-out infinite;
+}
+@keyframes alert-blink { 50% { opacity: .45; } }
+
 main { padding: 20px; max-width: 1000px; margin: 0 auto; }
 .panel { display: none; }
 .panel.active { display: block; }

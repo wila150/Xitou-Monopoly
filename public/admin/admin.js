@@ -37,6 +37,7 @@ function switchTab(tab) {
   if (tab === "referees") loadReferees();
   if (tab === "leaders") loadTeamLeaders();
   if (tab === "broadcasters") loadBroadcasters();
+  if (tab === "emergencies") loadEmergencies();
   if (tab === "submissions") loadSubmissions();
   if (tab === "bonus-log") loadBonusLog();
   if (tab === "welcome") loadWelcomeMessage();
@@ -412,16 +413,93 @@ async function loadBroadcasters() {
 }
 document.getElementById("refresh-broadcasters").addEventListener("click", loadBroadcasters);
 
+// ---- 緊急聯絡 ----
+const emergenciesMsg = document.getElementById("emergencies-msg");
+const escapeHtml = (t) =>
+  String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function emergencyCardHtml(r) {
+  const open = r.status === "OPEN";
+  const who = r.displayName ? `${r.displayName}（${r.identityLabel}）` : r.identityLabel;
+  return `
+    <div class="cp-card" data-id="${r.id}" style="${open ? "border-left:5px solid #c0392b;" : "opacity:.65;"}">
+      <strong>${open ? "🚨" : "✅"} #${r.id}｜${escapeHtml(who)}</strong>
+      ${r.checkpointLabel ? `<p style="margin:6px 0 0;">📍 目前關卡：${escapeHtml(r.checkpointLabel)}</p>` : ""}
+      <p style="margin:6px 0 0;">💬 ${r.detail ? escapeHtml(r.detail) : `<span style="color:#888;">（尚未說明，請儘快聯繫對方確認狀況）</span>`}</p>
+      <p style="font-size:12px;color:#888;margin:6px 0 0;">
+        🆔 ...${escapeHtml(r.userIdSuffix)}　送出：${new Date(r.createdAt).toLocaleString("zh-TW")}
+        ${open ? "" : `　處理：${r.handledAt ? new Date(r.handledAt).toLocaleString("zh-TW") : "-"}`}
+      </p>
+      ${open ? `<div class="toolbar" style="margin-top:10px;"><button class="btn handle-emergency" data-id="${r.id}">✅ 已處理（通知回報者）</button></div>` : ""}
+    </div>
+  `;
+}
+
+let lastEmergencySnapshot = "";
+async function loadEmergencies({ silent = false } = {}) {
+  const rows = await api("/api/emergencies");
+  updateEmergencyBadge(rows.filter((r) => r.status === "OPEN").length);
+  const snapshot = JSON.stringify(rows.map((r) => [r.id, r.status, r.detail, r.lastAlertedAt]));
+  if (silent && snapshot === lastEmergencySnapshot) return;
+  lastEmergencySnapshot = snapshot;
+  const list = document.getElementById("emergencies-list");
+  if (rows.length === 0) {
+    list.innerHTML = `<p style="color:#888;font-size:13px;">目前沒有任何緊急聯絡 👍</p>`;
+    return;
+  }
+  list.innerHTML = rows.map(emergencyCardHtml).join("");
+  list.querySelectorAll(".handle-emergency").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        const res = await api(`/api/emergencies/${btn.dataset.id}/handle`, { method: "POST" });
+        showMsg(emergenciesMsg, res.message || "已標記為處理中，並通知回報者。", false);
+        await loadEmergencies();
+      } catch (err) {
+        btn.disabled = false;
+        showMsg(emergenciesMsg, err.message, true);
+      }
+    });
+  });
+}
+document.getElementById("refresh-emergencies").addEventListener("click", () => loadEmergencies());
+
+// 緊急聯絡比審核急：不管停在哪個分頁都每 5 秒更新一次數量徽章（在這個分頁時連內容一起更新）
+setInterval(() => {
+  if (document.hidden) return;
+  const onTab = document.getElementById("panel-emergencies").classList.contains("active");
+  loadEmergencies({ silent: onTab }).catch(() => {});
+}, 5000);
+
 // ---- 照片／影片審核佇列 ----
 const submissionsMsg = document.getElementById("submissions-msg");
 const BASE_TITLE = document.title;
 let approvingIds = new Set();
 
 // 分頁標籤與瀏覽器標題顯示待審核數量，小編不用一直切到這個分頁才知道有新的
+let pendingSubmissionCount = 0;
+let openEmergencyCount = 0;
+
+function refreshTitleBadge() {
+  const prefix =
+    (openEmergencyCount > 0 ? `🚨${openEmergencyCount} ` : "") +
+    (pendingSubmissionCount > 0 ? `(${pendingSubmissionCount}) ` : "");
+  document.title = prefix + BASE_TITLE;
+}
+
 function updatePendingBadge(count) {
+  pendingSubmissionCount = count;
   const tab = document.querySelector('.tab-btn[data-tab="submissions"]');
   tab.textContent = count > 0 ? `照片／影片審核 (${count})` : "照片／影片審核";
-  document.title = count > 0 ? `(${count}) ${BASE_TITLE}` : BASE_TITLE;
+  refreshTitleBadge();
+}
+
+function updateEmergencyBadge(count) {
+  openEmergencyCount = count;
+  const tab = document.querySelector('.tab-btn[data-tab="emergencies"]');
+  tab.textContent = count > 0 ? `🚨 緊急聯絡 (${count})` : "🚨 緊急聯絡";
+  tab.classList.toggle("alert", count > 0);
+  refreshTitleBadge();
 }
 
 function submissionCardHtml(r) {

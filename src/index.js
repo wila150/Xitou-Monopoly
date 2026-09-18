@@ -14,6 +14,8 @@ const adminRouter = require("./admin/router");
 
 const app = express();
 
+teamService.setProfileResolver(lineClient.getDisplayName);
+
 // 用檔案開頭幾個 byte 判斷實際圖片格式，比直接假設「LINE 照片一定是 JPEG」保險
 // （相簿選圖也可能是 PNG，例如截圖），存進審核佇列的 Content-Type 才會跟實際內容一致。
 function detectImageMimeType(buffer) {

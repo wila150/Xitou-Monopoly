@@ -986,3 +986,112 @@ test("密語比對：自動忽略頭尾空白與大小寫，支援用「｜」�
   // 測完清掉臨時組別，避免留在共用測試資料庫裡影響之後的測試
   await configStore.deleteTeamRoute(99);
 });
+
+// ---- 緊急聯絡 ----
+
+test("緊急聯絡：隊員傳送後小編立刻收到警報（含組別、關卡、一鍵接手），回報者收到安心訊息", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 3組");
+  await commandRouter.route(ADMIN, "出發 3組");
+
+  const result = await commandRouter.route("Uleader", "緊急聯絡");
+  assert.match(textsOf(result)[0], /已通知小編/);
+  assert.match(textsOf(result)[0], /緊急聯絡 說明內容/);
+
+  assert.equal(result.directPushes.length, 1);
+  assert.equal(result.directPushes[0].to, ADMIN);
+  const alert = result.directPushes[0].messages[0];
+  assert.match(alert.text, /🚨.*緊急聯絡 #\d+/);
+  assert.match(alert.text, /第 3 組隊長/);
+  assert.match(alert.text, /目前關卡：.*「/);
+  assert.match(alert.text, /https:\/\/example\.com\/admin#emergencies/);
+  const quick = alert.quickReply.items[0].action;
+  assert.match(quick.text, /^處理緊急 \d+$/);
+  assert.match(quick.label, /我來處理/);
+});
+
+test("緊急聯絡：附說明、關主與尚未報到的帳號也能用，說明文字會轉給小編", async () => {
+  await resetGame();
+  await commandRouter.route(STAFF, "我是B3關主");
+
+  const withDetail = await commandRouter.route(STAFF, "緊急聯絡 有人扭傷腳踝，在B3附近");
+  assert.match(withDetail.directPushes[0].messages[0].text, /關主/);
+  assert.match(withDetail.directPushes[0].messages[0].text, /有人扭傷腳踝，在B3附近/);
+  assert.match(textsOf(withDetail)[0], /補充的說明已一併轉給小編/);
+
+  // 完全沒身分的帳號也要能求救
+  const stranger = await commandRouter.route("Ustranger", "緊急求助：迷路了");
+  assert.equal(stranger.directPushes.length, 1);
+  assert.match(stranger.directPushes[0].messages[0].text, /尚未報到的帳號/);
+  assert.match(stranger.directPushes[0].messages[0].text, /迷路了/);
+});
+
+test("緊急聯絡：60 秒內重複按不洗版；之後補充說明併入同一件，不會開新的一筆", async () => {
+  await resetGame();
+  const first = await commandRouter.route("Ua", "緊急聯絡");
+  assert.equal(first.directPushes.length, 1);
+
+  const repeat = await commandRouter.route("Ua", "緊急聯絡");
+  assert.equal(repeat.directPushes.length, 0);
+  assert.match(textsOf(repeat)[0], /剛剛已送出/);
+
+  const supplement = await commandRouter.route("Ua", "緊急聯絡 位置在神木步道入口");
+  assert.equal(supplement.directPushes.length, 1);
+  assert.match(supplement.directPushes[0].messages[0].text, /補充說明/);
+
+  const list = await teamService.listEmergencies();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].status, "OPEN");
+  assert.equal(list[0].detail, "位置在神木步道入口");
+});
+
+test("緊急聯絡：小編按「處理緊急 N」接手，通知回報者與其他小編；非小編不能用；重複接手不會重複通知", async () => {
+  await resetGame();
+  const report = await commandRouter.route("Ua", "緊急聯絡 肚子痛");
+  const id = (report.directPushes[0].messages[0].text.match(/#(\d+)/) || [])[1];
+
+  const denied = await commandRouter.route("Ua", `處理緊急 ${id}`);
+  assert.match(textsOf(denied)[0], /僅限小編/);
+
+  const handled = await commandRouter.route(ADMIN, `處理緊急 ${id}`);
+  assert.match(textsOf(handled)[0], /已標記緊急聯絡/);
+  const toReporter = handled.directPushes.find((p) => p.to === "Ua");
+  assert.match(toReporter.messages[0].text, /小編已收到您的緊急聯絡/);
+
+  const again = await commandRouter.route(ADMIN, `處理緊急 #${id}`);
+  assert.match(textsOf(again)[0], /已經有人接手/);
+  assert.equal(again.directPushes.length, 0);
+
+  const missing = await commandRouter.route(ADMIN, "處理緊急 99999");
+  assert.match(textsOf(missing)[0], /找不到/);
+
+  assert.equal(await teamService.countOpenEmergencies(), 0);
+  // 已處理之後再求助，視為新的一件
+  const next = await commandRouter.route("Ua", "緊急聯絡");
+  assert.equal(next.directPushes.length, 1);
+  assert.equal(await teamService.countOpenEmergencies(), 1);
+});
+
+test("緊急聯絡：正在推播兩步驟對話中也能立刻送出；重置遊戲會清空紀錄", async () => {
+  await resetGame();
+  await commandRouter.route(ADMIN, "推播");
+  const result = await commandRouter.route(ADMIN, "緊急聯絡");
+  assert.equal(result.directPushes.length, 1);
+
+  await commandRouter.route(ADMIN, "重置遊戲 確認");
+  assert.equal((await teamService.listEmergencies()).length, 0);
+});
+
+test("緊急聯絡：各身分的使用說明都列出這個指令，小編說明多一條處理緊急，別人看不到", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  const leaderGuide = allTexts((await commandRouter.route("Uleader", "使用說明")).reply).join("\n");
+  assert.match(leaderGuide, /緊急聯絡/);
+  assert.doesNotMatch(leaderGuide, /處理緊急/);
+
+  const general = allTexts((await commandRouter.route("Unobody", "使用說明")).reply).join("\n");
+  assert.match(general, /緊急聯絡/);
+
+  const adminGuide = allTexts((await commandRouter.route(ADMIN, "使用說明")).reply).join("\n");
+  assert.match(adminGuide, /處理緊急/);
+});

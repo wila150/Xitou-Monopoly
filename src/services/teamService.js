@@ -151,6 +151,7 @@ function teamHelpMsg(role, groupNo = null) {
     "• 闖關進度：查詢已完成關卡數與累計耗時",
     "• 排行榜：小編開放後才能查詢",
     "• 使用說明：完整流程說明",
+    "• 緊急聯絡：遇到危險、受傷或迷路，立刻通知小編處理",
     "",
     "🎯 過關方式：有關主的關卡，向關主取得關鍵字後直接輸入；沒有關主的關卡，直接上傳照片或影片，等小編確認。",
   ];
@@ -184,6 +185,7 @@ function refereeHelpMsg(checkpointId = null) {
       "• 通過 X組（例如「通過 1組」）：確認該組完成您這一關，解鎖下一關（只對您登記的這一關生效）",
       "• 關主報到（或關主綁定）／我是 XX 關主：想換負責的關卡時重新登記",
       "• 我的ID：查詢自己的 userId",
+      "• 緊急聯絡：遇到緊急狀況，立刻通知小編處理",
       "",
       "🔔 有隊伍出發或過關、正往您這關前進時，系統會自動通知您。",
     ].join("\n")
@@ -199,6 +201,7 @@ function broadcasterHelpMsg(guide = false) {
       "• 推播：依序回覆對象與內容",
       "• 取消：中途放棄推播",
       "• 我的ID：查詢自己的 userId",
+      "• 緊急聯絡：遇到緊急狀況，立刻通知小編處理",
       "",
       "⚠️ 「所有人」會推給全部隊伍成員與關主，推播則數較多，請斟酌使用。",
     ].join("\n")
@@ -217,6 +220,7 @@ function adminHelpMsg() {
       "• 進度：查看所有組別狀態",
       "• 遊戲結束：提前停止受理新的關卡進度",
       "• 排行榜開啟／排行榜關閉：控制排行榜是否公開",
+      "• 處理緊急 N：接手處理某則緊急聯絡（收到警報時直接點訊息底下的「我來處理」按鈕即可）",
       "• 推播（隊長／關主／所有人）：小編不用登記就能用",
       "• 重置關主／重置總領隊：清空登記",
       "• 重置遊戲 → 重置遊戲 確認：清空整場資料（不含關主與總領隊登記）",
@@ -233,6 +237,7 @@ function generalGuideMsg() {
       "2️⃣ 出發：關主確認隊伍到齊後會公布第一關\n" +
       "3️⃣ 過關：有關主的關卡輸入關主告知的關鍵字；沒有關主的關卡直接上傳照片或影片，等小編確認\n" +
       "4️⃣ 查詢：「目前關卡」看這一關資訊、「闖關進度」看完成幾關與耗時\n" +
+      "🚨 緊急狀況（受傷、迷路、危險）：輸入「緊急聯絡」，小編會立刻收到通知\n" +
       "5️⃣ 終點：全部關卡（或提前結束）後，帶隊伍到 B6 由工作人員辦理終點確認\n\n" +
       "完成報到後，再輸入一次「使用說明」會看到您這個身分專屬的指令。\n" +
       "有問題請直接聯繫現場小編。"
@@ -1061,6 +1066,245 @@ async function listBonusLog() {
   }));
 }
 
+// ---- 七之三、緊急聯絡 ----
+// 任何人（隊員、關主、總領隊、還沒報到的帳號）傳「緊急聯絡」，立刻推播給所有小編，並留一筆紀錄。
+// 小編按訊息底下的「我來處理」（＝輸入「處理緊急 N」）或後台按「已處理」後，會回頭通知回報者。
+
+const EMERGENCY_REPEAT_WINDOW_MS = 60 * 1000; // 同一個人 60 秒內重複按，不再重複推播，避免洗版
+const EMERGENCY_MERGE_WINDOW_MS = 30 * 60 * 1000; // 30 分鐘內還沒處理的，後續補充都算同一件
+
+// 查 LINE 顯示名稱用：由 src/index.js 啟動時注入（teamService 本身不碰 LINE API，測試也不會打到網路）
+let profileResolver = null;
+function setProfileResolver(fn) {
+  profileResolver = fn;
+}
+
+async function lookupDisplayName(userId) {
+  if (!profileResolver) return null;
+  try {
+    return (await profileResolver(userId)) || null;
+  } catch (err) {
+    console.error("查詢 LINE 顯示名稱失敗（不影響緊急聯絡）：", err);
+    return null;
+  }
+}
+
+function taipeiTime(iso) {
+  return new Date(iso).toLocaleTimeString("zh-TW", {
+    timeZone: "Asia/Taipei",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function checkpointLabelOf(checkpointId) {
+  try {
+    return `${checkpointId}「${getCheckpoint(checkpointId).name}」`;
+  } catch {
+    return checkpointId;
+  }
+}
+
+// 回報者是誰、人在哪一關，讓小編一看就知道要去哪裡、找誰
+async function describeReporter(userId) {
+  const identities = [];
+  let groupNo = null;
+  let checkpointLabel = null;
+
+  const member = await findMembership(db, userId);
+  if (member) {
+    groupNo = member.group_no;
+    identities.push(`第 ${member.group_no} 組${member.role === "LEADER" ? "隊長" : "組員"}`);
+    const team = await findTeam(db, member.group_no);
+    if (team && team.status === "CHECKED_IN") {
+      checkpointLabel = "尚未出發";
+    } else if (team && team.status === "FINISHED") {
+      checkpointLabel = "已完成終點確認";
+    } else if (team) {
+      const route = getRoute(team.group_no);
+      const current = route[team.current_index];
+      if (current) checkpointLabel = checkpointLabelOf(current.checkpointId);
+    }
+  }
+  const refereeCheckpoint = await getRefereeCheckpoint(userId);
+  if (refereeCheckpoint) {
+    const label = checkpointLabelOf(refereeCheckpoint);
+    identities.push(`${label}關主`);
+    if (!checkpointLabel) checkpointLabel = label;
+  }
+  if (await isBroadcaster(userId)) identities.push("總領隊");
+  if (getAdminIds().includes(userId)) identities.push("小編");
+  if (identities.length === 0) identities.push("尚未報到的帳號");
+
+  return { groupNo, identityLabel: identities.join("＋"), checkpointLabel };
+}
+
+function emergencyAdminMessage(row, kind) {
+  const title =
+    kind === "supplement"
+      ? `📝 緊急聯絡 #${row.id} 補充說明`
+      : kind === "reminder"
+        ? `🔔 緊急聯絡 #${row.id} 再次提醒（尚未有人處理）`
+        : `🚨🚨 緊急聯絡 #${row.id} 🚨🚨`;
+  const who = row.display_name ? `${row.display_name}（${row.identity_label}）` : row.identity_label;
+  const lines = [title, `👤 ${who}`];
+  if (row.checkpoint_label) lines.push(`📍 目前關卡：${row.checkpoint_label}`);
+  lines.push(`💬 說明：${row.detail || "（尚未說明，請儘快聯繫對方確認狀況）"}`);
+  lines.push(`🆔 ...${row.user_id.slice(-6)}　🕒 ${taipeiTime(row.last_alerted_at)}`);
+  const base = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  if (base) lines.push(`👉 ${base}/admin#emergencies`);
+  return {
+    ...textMsg(lines.join("\n")),
+    quickReply: {
+      items: [
+        {
+          type: "action",
+          action: { type: "message", label: `🙋 我來處理 #${row.id}`, text: `處理緊急 ${row.id}` },
+        },
+      ],
+    },
+  };
+}
+
+function emergencyReporterReply(detailGiven) {
+  const phone = (process.env.EMERGENCY_PHONE || "").trim();
+  const lines = [
+    "🚨 已通知小編！請留在安全的地方、保持手機暢通，小編會盡快與您聯繫。",
+    detailGiven
+      ? "📝 您補充的說明已一併轉給小編。"
+      : "📝 想補充狀況（例如受傷、迷路、所在位置），請輸入「緊急聯絡 說明內容」。",
+  ];
+  if (phone) lines.push(`📞 情況危急請直接撥打：${phone}`);
+  return textMsg(lines.join("\n"));
+}
+
+async function reportEmergency(userId, detail = "") {
+  const text = String(detail || "").trim();
+  const adminIds = getAdminIds();
+  const pushToAdmins = (row, kind) => {
+    const messages = [emergencyAdminMessage(row, kind)];
+    return adminIds.map((adminId) => ({ to: adminId, messages }));
+  };
+  const noAdminWarning = adminIds.length === 0
+    ? [textMsg("⚠️ 系統目前沒有設定小編帳號，訊息無法即時送達，請直接聯繫現場工作人員！")]
+    : [];
+
+  const now = new Date();
+  const existing = await db.get(
+    "SELECT * FROM emergencies WHERE user_id = ? AND status = 'OPEN' ORDER BY id DESC LIMIT 1",
+    [userId]
+  );
+  const stillOpen =
+    existing && now.getTime() - new Date(existing.created_at).getTime() < EMERGENCY_MERGE_WINDOW_MS;
+
+  if (stillOpen) {
+    if (text) {
+      const merged = existing.detail ? `${existing.detail}\n${text}` : text;
+      await db.run("UPDATE emergencies SET detail = ?, last_alerted_at = ? WHERE id = ?", [
+        merged,
+        now.toISOString(),
+        existing.id,
+      ]);
+      const row = { ...existing, detail: text, last_alerted_at: now.toISOString() };
+      return {
+        reply: [emergencyReporterReply(true), ...noAdminWarning],
+        directPushes: pushToAdmins(row, "supplement"),
+      };
+    }
+    if (now.getTime() - new Date(existing.last_alerted_at).getTime() < EMERGENCY_REPEAT_WINDOW_MS) {
+      return {
+        reply: [
+          textMsg(
+            "🚨 您剛剛已送出緊急聯絡，小編已收到，請稍候、保持手機暢通。\n📝 想補充狀況請輸入「緊急聯絡 說明內容」。"
+          ),
+        ],
+        directPushes: [],
+      };
+    }
+    await db.run("UPDATE emergencies SET last_alerted_at = ? WHERE id = ?", [
+      now.toISOString(),
+      existing.id,
+    ]);
+    const row = { ...existing, last_alerted_at: now.toISOString() };
+    return {
+      reply: [emergencyReporterReply(false), ...noAdminWarning],
+      directPushes: pushToAdmins(row, "reminder"),
+    };
+  }
+
+  const displayName = await lookupDisplayName(userId);
+  const who = await describeReporter(userId);
+  const ts = now.toISOString();
+  const inserted = await db.get(
+    `INSERT INTO emergencies
+       (user_id, display_name, group_no, identity_label, checkpoint_label, detail, status, created_at, last_alerted_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?) RETURNING *`,
+    [userId, displayName, who.groupNo, who.identityLabel, who.checkpointLabel, text || null, ts, ts]
+  );
+  return {
+    reply: [emergencyReporterReply(!!text), ...noAdminWarning],
+    directPushes: pushToAdmins(inserted, "new"),
+  };
+}
+
+// 小編接手：LINE 指令「處理緊急 N」與後台按鈕共用。回覆回報者一則安心訊息，並告知其他小編已有人處理，避免重複跑去。
+async function handleEmergency(emergencyId, handledBy) {
+  const row = await db.get("SELECT * FROM emergencies WHERE id = ?", [emergencyId]);
+  if (!row) return { reply: [textMsg(`⚠️ 找不到緊急聯絡 #${emergencyId}，可能已被遊戲重置清除。`)], directPushes: [] };
+  if (row.status === "HANDLED") {
+    return { reply: [textMsg(`ℹ️ 緊急聯絡 #${emergencyId} 已經有人接手處理囉。`)], directPushes: [] };
+  }
+  await db.run(
+    "UPDATE emergencies SET status = 'HANDLED', handled_by = ?, handled_at = ? WHERE id = ?",
+    [handledBy, nowIso(), emergencyId]
+  );
+  const who = row.display_name ? `${row.display_name}（${row.identity_label}）` : row.identity_label;
+  const directPushes = [
+    {
+      to: row.user_id,
+      messages: [textMsg("✅ 小編已收到您的緊急聯絡，正在處理中，請留在原地、保持手機暢通。")],
+    },
+  ];
+  for (const adminId of getAdminIds()) {
+    if (adminId === handledBy) continue;
+    directPushes.push({
+      to: adminId,
+      messages: [textMsg(`ℹ️ 緊急聯絡 #${emergencyId}（${who}）已有小編接手處理，不用重複前往。`)],
+    });
+  }
+  return {
+    reply: [textMsg(`✅ 已標記緊急聯絡 #${emergencyId}（${who}）由您處理，並已通知回報者。`)],
+    directPushes,
+  };
+}
+
+// 給後台網頁：未處理的排前面，其次新的在前；userId 只給末 6 碼
+async function listEmergencies() {
+  const rows = await db.all(
+    `SELECT * FROM emergencies
+     ORDER BY CASE WHEN status = 'OPEN' THEN 0 ELSE 1 END, created_at DESC`
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    displayName: r.display_name,
+    userIdSuffix: r.user_id.slice(-6),
+    groupNo: r.group_no,
+    identityLabel: r.identity_label,
+    checkpointLabel: r.checkpoint_label,
+    detail: r.detail,
+    status: r.status,
+    createdAt: r.created_at,
+    lastAlertedAt: r.last_alerted_at,
+    handledAt: r.handled_at,
+  }));
+}
+
+async function countOpenEmergencies() {
+  const row = await db.get("SELECT COUNT(*) AS n FROM emergencies WHERE status = 'OPEN'");
+  return Number(row.n);
+}
+
 // ---- 八、重置整場遊戲（小編用，非文件原始條款，供活動前彩排／正式開賽前重置）----
 
 async function resetGame() {
@@ -1072,6 +1316,7 @@ async function resetGame() {
     await tx.run("DELETE FROM settings");
     await tx.run("DELETE FROM bonus_log");
     await tx.run("DELETE FROM pending_submissions");
+    await tx.run("DELETE FROM emergencies");
     return [textMsg("♻️ 已重置整場遊戲，所有組別的報到、進度與紀錄皆已清空。")];
   });
 }
@@ -1312,6 +1557,11 @@ module.exports = {
   unbindGroup,
   addBonusPoints,
   listBonusLog,
+  reportEmergency,
+  handleEmergency,
+  listEmergencies,
+  countOpenEmergencies,
+  setProfileResolver,
   resetGame,
   queryCurrentCheckpoint,
   queryProgress,

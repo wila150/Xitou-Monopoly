@@ -308,6 +308,29 @@ router.delete("/api/submissions/:id", async (req, res, next) => {
   }
 });
 
+// ---- 緊急聯絡 ----
+
+router.get("/api/emergencies", async (req, res, next) => {
+  try {
+    res.json(await teamService.listEmergencies());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 後台按「已處理」：跟 LINE 上按「我來處理」同一個底層函式，會通知回報者與其他小編
+router.post("/api/emergencies/:id/handle", async (req, res, next) => {
+  try {
+    const result = await teamService.handleEmergency(Number(req.params.id), "後台網頁");
+    for (const p of result.directPushes || []) {
+      await lineClient.push(p.to, p.messages);
+    }
+    res.json({ ok: true, message: (result.reply || []).map((m) => m.text).join("\n") });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---- 加好友歡迎詞 ----
 
 router.get("/api/welcome-message", (req, res) => {

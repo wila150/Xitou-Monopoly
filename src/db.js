@@ -164,6 +164,24 @@ CREATE TABLE IF NOT EXISTS pending_submissions (
   submitted_at   TEXT NOT NULL
 );
 
+-- 緊急聯絡：任何人（隊員、關主、總領隊、還沒報到的帳號）傳「緊急聯絡」，系統立刻推播給小編，
+-- 並在這裡留一筆紀錄，小編按「我來處理」或後台按「已處理」後會通知回報者。
+-- 屬於遊戲進行中的紀錄，「重置遊戲」會一併清空。
+CREATE TABLE IF NOT EXISTS emergencies (
+  id               SERIAL PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  display_name     TEXT,
+  group_no         INTEGER,
+  identity_label   TEXT NOT NULL,
+  checkpoint_label TEXT,
+  detail           TEXT,
+  status           TEXT NOT NULL DEFAULT 'OPEN', -- 'OPEN' | 'HANDLED'
+  created_at       TEXT NOT NULL,
+  last_alerted_at  TEXT NOT NULL,
+  handled_by       TEXT,
+  handled_at       TEXT
+);
+
 CREATE TABLE IF NOT EXISTS team_route_configs (
   group_no       INTEGER NOT NULL,
   order_index    INTEGER NOT NULL,
