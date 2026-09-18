@@ -67,4 +67,6 @@ module.exports = {
   pushToMany,
   getMessageContent,
   getDisplayName,
+  SignatureValidationFailed: line.SignatureValidationFailed,
+  JSONParseError: line.JSONParseError,
 };

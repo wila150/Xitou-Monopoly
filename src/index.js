@@ -59,6 +59,16 @@ app.post("/webhook", lineClient.webhookMiddleware, async (req, res) => {
   await Promise.all(events.map(handleEvent));
 });
 
+// LINE 的 webhook 簽章驗證失敗（不是 LINE 送來的、或 channel secret 設錯）回 401，不要讓它變成 500 干擾錯誤監控
+// eslint-disable-next-line no-unused-vars
+app.use("/webhook", (err, req, res, next) => {
+  if (err instanceof lineClient.SignatureValidationFailed || err instanceof lineClient.JSONParseError) {
+    return res.status(401).send("invalid signature");
+  }
+  console.error("webhook 發生未預期錯誤：", err);
+  res.status(500).end();
+});
+
 // 加好友時的歡迎訊息：LINE 官方帳號後台內建的「加入好友歡迎訊息」功能請關閉（見 README），
 // 統一由這裡的 webhook 發送，才會跟報到指令實際支援的格式（見 commandRouter.js 的 CHECKIN_RE）保持一致。
 // 實際文字內容存在資料庫、可在後台網頁編輯（見 configStore.getWelcomeMessage／setWelcomeMessage）。
