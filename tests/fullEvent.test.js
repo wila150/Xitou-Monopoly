@@ -95,12 +95,13 @@ async function passCurrentStep(groupNo) {
   return cp.verifyType;
 }
 
-test("群體測試：10 組同時闖完 12 關（隊長＋組員、4 位關主、總領隊、小編），過程中隨時查詢都一致", async () => {
+test("群體測試：10 組同時闖完 12 關（隊長＋組員、4 位關主、B6 終點工作人員、總領隊、小編），過程中隨時查詢都一致", async () => {
   await resetAll();
   const groups = getAllGroupNos();
   assert.equal(groups.length, 10);
 
-  // ---- 登記：4 位關主、1 位總領隊 ----
+  // ---- 登記：4 位關主、B6 終點工作人員、1 位總領隊 ----
+  await commandRouter.route("Ub6staff", "我是 B6 關主");
   for (const cpId of REFEREE_CHECKPOINTS) {
     const r = await commandRouter.route(refereeOf(cpId), `我是 ${cpId} 關主`);
     assert.match(textsOf(r).join("\n"), /已登記|登記成功/);
@@ -197,14 +198,14 @@ test("群體測試：10 組同時闖完 12 關（隊長＋組員、4 位關主�
   assert.match(firstText(toLeaders), /已推播給 10 位小隊長/);
   assert.equal(toLeaders.directPushes.length, 10);
   const toReferees = await commandRouter.route("Ubroadcaster", "推播 關主 請注意天氣");
-  assert.equal(toReferees.directPushes.length, 4);
+  assert.equal(toReferees.directPushes.length, 5, "4 位關主 + B6 終點工作人員");
   const toAll = await commandRouter.route("Ubroadcaster", "推播 所有人 午餐開始");
-  assert.match(firstText(toAll), /共 24 位/); // 10 隊長 + 10 組員 + 4 關主
-  assert.equal(toAll.directPushes.length, 24);
+  assert.match(firstText(toAll), /共 25 位/); // 10 隊長 + 10 組員 + 5 關主（含 B6 終點工作人員）
+  assert.equal(toAll.directPushes.length, 25);
 
   // ---- 終點：B6 工作人員逐組「到站」，全部 FINISHED ----
   for (const g of groups) {
-    const r = await commandRouter.route(ADMIN, `到站 ${g}組`);
+    const r = await commandRouter.route("Ub6staff", `到站 ${g}組`);
     assert.match(firstText(r), new RegExp(`已為第 ${g} 組辦理終點確認`));
     const team = await teamService.findTeam(g);
     assert.equal(team.status, "FINISHED");
@@ -266,6 +267,8 @@ test("各身分權限矩陣：陌生人／隊長／組員／關主／總領隊�
 
   // 每列：[指令, 誰可以用（其餘一律被拒絕）, 被拒絕時的訊息]
   const ADMIN_ONLY = /僅限小編使用/;
+  const DEPART_DENIED = /「出發」僅限小編或登記過的關主／總領隊/;
+  const FINISH_DENIED = /「到站」僅限小編或登記在 B6 的關主/;
   const STAFF_ONLY = /僅限小編或登記過的關主使用/;
   const matrix = [
     ["解除綁定 9組", [ADMINISTRATOR], ADMIN_ONLY],
@@ -279,6 +282,8 @@ test("各身分權限矩陣：陌生人／隊長／組員／關主／總領隊�
     ["重置總領隊", [ADMINISTRATOR], ADMIN_ONLY],
     ["重置遊戲", [ADMINISTRATOR], ADMIN_ONLY],
     ["處理緊急 99999", [ADMINISTRATOR], ADMIN_ONLY],
+    ["出發 9組", [ADMINISTRATOR, REFEREE, BROADCASTER], DEPART_DENIED],
+    ["到站 9組", [ADMINISTRATOR], FINISH_DENIED], // B3 關主不能到站，只有登記在 B6 的關主與小編可以
     ["通過 9組", [ADMINISTRATOR, REFEREE], STAFF_ONLY],
     ["進度", [ADMINISTRATOR, REFEREE], STAFF_ONLY],
     ["順序", [ADMINISTRATOR, REFEREE], STAFF_ONLY],

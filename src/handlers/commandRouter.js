@@ -85,6 +85,38 @@ function approveOnlyDenied() {
   return withReply([teamService.textMsg("🚫 此指令僅限小編或登記過的關主使用。")]);
 }
 
+// 出發／到站會啟動或停止某一組的計時，成績都靠這兩個時間，所以不能讓隊伍或陌生人自己按：
+// 出發＝小編、登記過的關主或總領隊（現場宣布出發的工作人員）；到站＝小編或登記在 B6 的關主（B6 終點工作人員）。
+const FINISH_CHECKPOINT_ID = "B6";
+
+function departOnlyDenied() {
+  return withReply([
+    teamService.textMsg(
+      "🚫 「出發」僅限小編或登記過的關主／總領隊使用，隊伍不需要自己按，請等待現場工作人員宣布。"
+    ),
+  ]);
+}
+
+function finishOnlyDenied() {
+  return withReply([
+    teamService.textMsg(
+      `🚫 「到站」僅限小編或登記在 ${FINISH_CHECKPOINT_ID} 的關主使用。終點工作人員請先輸入「我是 ${FINISH_CHECKPOINT_ID} 關主」登記。`
+    ),
+  ]);
+}
+
+async function canDepart(userId) {
+  return (
+    isAdmin(userId) ||
+    !!(await teamService.getRefereeCheckpoint(userId)) ||
+    (await teamService.isBroadcaster(userId))
+  );
+}
+
+async function canFinish(userId) {
+  return isAdmin(userId) || (await teamService.getRefereeCheckpoint(userId)) === FINISH_CHECKPOINT_ID;
+}
+
 function broadcastOnlyDenied() {
   return withReply([
     teamService.textMsg("🚫 此指令僅限小編或登記過的總領隊使用，請先輸入「總領綁定」進行登記。"),
@@ -202,6 +234,7 @@ async function route(userId, rawText) {
   }
 
   if ((groupNo = matchGroupNo(text, DEPART_RE)) != null) {
+    if (!(await canDepart(userId))) return departOnlyDenied();
     const result = await teamService.depart(groupNo);
     return {
       reply: result.reply,
@@ -212,6 +245,7 @@ async function route(userId, rawText) {
 
   if ((groupNo = matchGroupNo(text, ARRIVE_RE)) != null) {
     // B6 終點工作人員觸發：隊伍實際抵達 B6，直接辦理終點確認（不需要隊長輸入任何代碼）
+    if (!(await canFinish(userId))) return finishOnlyDenied();
     const result = await teamService.finishAtB6(groupNo);
     return {
       reply: result.reply,

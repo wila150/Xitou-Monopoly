@@ -169,9 +169,10 @@ function teamHelpMsg(role, groupNo = null) {
   return textMsg(lines.join("\n"));
 }
 
-function refereeHelpMsg(checkpointId = null) {
+// guide＝true 是「使用說明」（標題帶關卡名稱），false 是剛登記完附上的簡短版；兩者都用 checkpointId 決定 B6 專屬的到站說明
+function refereeHelpMsg(checkpointId = null, guide = false) {
   let title = "📖 關主可用指令";
-  if (checkpointId) {
+  if (checkpointId && guide) {
     try {
       title = `📖 使用說明｜${checkpointId}「${getCheckpoint(checkpointId).name}」關主`;
     } catch {
@@ -183,6 +184,8 @@ function refereeHelpMsg(checkpointId = null) {
       title,
       "• 進度（或「順序」）：查看這關的預定來訪順序（依路線設定排），每組標上實際進度",
       "• 通過 X組（例如「通過 1組」）：確認該組完成您這一關，解鎖下一關（只對您登記的這一關生效）",
+      "• 出發 X組：現場宣布出發時，開始該組計時並公布第一關",
+      ...(checkpointId === "B6" ? ["• 到站 X組：隊伍抵達 B6，辦理終點確認、停止計時（只有登記在 B6 的關主能用）"] : []),
       "• 關主報到（或關主綁定）／我是 XX 關主：想換負責的關卡時重新登記",
       "• 我的ID：查詢自己的 userId",
       "• 緊急聯絡：遇到緊急狀況，立刻通知小編處理",
@@ -196,6 +199,7 @@ function broadcasterHelpMsg(guide = false) {
   return textMsg(
     [
       guide ? "📖 使用說明｜總領隊" : "📖 總領隊可用指令",
+      "• 出發 X組：現場宣布出發時，開始該組計時並公布第一關",
       "• 推播 隊長 訊息內容：一行打完，直接送出（對象可換成「關主」「所有人」）",
       "• 推播 隊長：先選對象，下一則訊息就是推播內容",
       "• 推播：依序回覆對象與內容",
@@ -254,7 +258,7 @@ async function usageGuideFor(userId, isAdminUser) {
   const membership = await findMembership(db, userId);
   if (membership) messages.push(teamHelpMsg(membership.role, membership.group_no));
   const refereeCheckpoint = await getRefereeCheckpoint(userId);
-  if (refereeCheckpoint) messages.push(refereeHelpMsg(refereeCheckpoint));
+  if (refereeCheckpoint) messages.push(refereeHelpMsg(refereeCheckpoint, true));
   if (await isBroadcaster(userId)) messages.push(broadcasterHelpMsg(true));
   if (isAdminUser) messages.push(adminHelpMsg());
   return messages.length > 0 ? messages : [generalGuideMsg()];
@@ -652,7 +656,7 @@ async function registerReferee(userId, checkpointId) {
     textMsg(
       `✅ 已登記為「${cp.name}」（${cp.id}）的關主。之後隊伍在這一關完成任務後，直接輸入「通過 X組」即可為該組解鎖下一關。`
     ),
-    refereeHelpMsg(),
+    refereeHelpMsg(checkpointId),
   ];
 }
 

@@ -512,6 +512,7 @@ test("到站：B6工作人員觸發終點確認，完賽指令改為提示訊息
   await commandRouter.route("Uleader", "報到 1組");
   await commandRouter.route("Umember", "報到 1組");
   await commandRouter.route(ADMIN, "出發 1組");
+  await commandRouter.route("Ub6staff", "我是 B6 關主"); // 終點工作人員要先登記在 B6
 
   const oldFinish = await commandRouter.route("Uleader", "完賽");
   assert.match(textsOf(oldFinish)[0], /終點確認」制/);
@@ -826,6 +827,46 @@ test("取消到站：只取消誤按的終點確認，完成關卡數不變；�
 
   // 重新到站後恢復正常
   assert.match(textsOf(await commandRouter.route(ADMIN, "到站 1組"))[0], /已為第 1 組辦理終點確認/);
+});
+
+test("出發／到站權限：隊伍成員與陌生人不能替任何一組出發或到站；出發＝小編／關主／總領隊，到站＝小編／登記在 B6 的關主", async () => {
+  await resetGame();
+  await commandRouter.route("Ulead1", "報到 1組");
+  await commandRouter.route("Ulead2", "報到 2組");
+  await commandRouter.route("Ub3ref", "我是 B3 關主");
+  await commandRouter.route("Ub6ref", "我是 B6 關主");
+  await commandRouter.route("Ubroadcaster", "總領綁定");
+
+  // 隊長替別組出發、陌生人替任何組出發：被擋，計時不會被動到
+  for (const who of ["Ulead1", "Ustranger"]) {
+    for (const target of ["1組", "2組"]) {
+      const r = await commandRouter.route(who, `出發 ${target}`);
+      assert.match(textsOf(r)[0], /「出發」僅限小編或登記過的關主／總領隊/);
+      assert.equal(r.groupBroadcasts.length, 0);
+    }
+  }
+  assert.equal((await teamService.findTeam(1)).status, "CHECKED_IN");
+  assert.equal((await teamService.findTeam(2)).status, "CHECKED_IN");
+
+  // 可以出發的身分：小編、任一位關主、總領隊
+  assert.match(textsOf(await commandRouter.route(ADMIN, "出發 1組"))[0], /已將第 1 組標記為出發/);
+  assert.match(textsOf(await commandRouter.route("Ub3ref", "出發 2組"))[0], /已將第 2 組標記為出發/);
+  await commandRouter.route("Ulead3", "報到 3組");
+  assert.match(textsOf(await commandRouter.route("Ubroadcaster", "出發 3組"))[0], /已將第 3 組標記為出發/);
+
+  // 到站：隊長自己、陌生人、其他關卡的關主、總領隊都不行，沒有終點確認也沒有動到計時
+  for (const who of ["Ulead1", "Ustranger", "Ub3ref", "Ubroadcaster"]) {
+    const r = await commandRouter.route(who, "到站 1組");
+    assert.match(textsOf(r)[0], /「到站」僅限小編或登記在 B6 的關主/, `${who} 不能到站`);
+    assert.match(textsOf(r)[0], /我是 B6 關主/);
+  }
+  const still = await teamService.findTeam(1);
+  assert.equal(still.status, "IN_PROGRESS");
+  assert.equal(still.finish_time, null);
+
+  // 小編、登記在 B6 的關主可以
+  assert.match(textsOf(await commandRouter.route("Ub6ref", "到站 1組"))[0], /已為第 1 組辦理終點確認/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "到站 2組"))[0], /已為第 2 組辦理終點確認/);
 });
 
 test("逾時判斷是看「出發後經過多久」，不是比對當天固定時刻", async () => {
