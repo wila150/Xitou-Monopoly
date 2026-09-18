@@ -1017,7 +1017,7 @@ async function countBroadcastRecipients(target) {
 async function broadcastMessage(target, text) {
   const label = BROADCAST_TARGET_LABELS[target];
   const ids = await resolveBroadcastRecipients(target);
-  const message = textMsg(`📢 總領隊訊息\n${text}`);
+  const message = textMsg(`📢 總領隊廣播\n${text}`);
   const directPushes = ids.map((id) => ({ to: id, messages: [message] }));
   let replyText;
   if (ids.length === 0) {

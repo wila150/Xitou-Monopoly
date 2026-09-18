@@ -1425,8 +1425,8 @@ test("推播：等待對象時又打完整指令不會被吃掉；冒號（全�
   await commandRouter.route("Uleader", "報到 1組");
   await commandRouter.route("Ureferee", "我是 B3 關主");
   const sent = (r) => textsOf(r)[0];
-  // 推出去的訊息格式是「📢 總領隊訊息\n內容」，取第二行之後當內容，確認冒號與對象沒有混進內容
-  const body = (r) => r.directPushes[0].messages[0].text.replace(/^📢 總領隊訊息\n/, "");
+  // 推出去的訊息格式是「📢 總領隊廣播\n內容」，取第二行之後當內容，確認冒號與對象沒有混進內容
+  const body = (r) => r.directPushes[0].messages[0].text.replace(/^📢 總領隊廣播\n/, "");
 
   // 重現回報的情境：先單獨打「群發」進入等待對象，再打完整的「群發 ：隊長 測試123」
   assert.match(sent(await commandRouter.route(ADMIN, "群發")), /請選擇推播對象/);
