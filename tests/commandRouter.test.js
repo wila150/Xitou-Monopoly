@@ -246,55 +246,70 @@ test("關主主動通知：出發跟過關時，登記在下一關的關主會�
   assert.match(approve.directPushes[0].messages[0].text, /第 1 組正往您這關（B3/);
 });
 
-test("關主專用進度查詢：「進度」只顯示跟自己這關有關的組別（在路上／已抵達），不顯示已通過或無關的組別", async () => {
+test("關主專用進度查詢：「進度」依路線預定順序列出這關的組別，每組標上實際進度（在路上／已抵達／已通過）", async () => {
   await resetGame();
   await commandRouter.route("Ub3referee", "我是 B3 關主");
   await commandRouter.route("Uleader", "報到 1組");
   await commandRouter.route(ADMIN, "出發 1組"); // 第1組目前在 D5，B3 是下一關
 
   const enRoute = await commandRouter.route("Ub3referee", "進度");
-  assert.match(textsOf(enRoute)[0], /1組｜🚶 已出發，還在路上/);
+  assert.match(textsOf(enRoute)[0], /1組（第 2 關）｜🚶 已出發，還在路上/);
 
   await teamService.submitMedia("Uleader");
   await commandRouter.route(ADMIN, "通過 1組"); // 第1組現在剛好卡在 B3
 
   const arrived = await commandRouter.route("Ub3referee", "進度");
-  assert.match(textsOf(arrived)[0], /1組｜✋ 已抵達，等待確認/);
+  assert.match(textsOf(arrived)[0], /1組（第 2 關）｜✋ 已抵達，等待確認/);
+  assert.match(textsOf(arrived)[0], /現在等您確認：1組/);
 
   await commandRouter.route(ADMIN, "通過 1組"); // 通過 B3 之後歸到「已通過」，不再是等待確認
 
   const passed = await commandRouter.route("Ub3referee", "進度");
-  assert.match(textsOf(passed)[0], /1組｜✅ 已通過/);
-  assert.doesNotMatch(textsOf(passed)[0], /已抵達|還在路上/);
+  assert.match(textsOf(passed)[0], /1組（第 2 關）｜✅ 已通過（\d{2}:\d{2}）/);
+  assert.doesNotMatch(textsOf(passed)[0], /現在等您確認/);
 });
 
-test("關主看來訪順序：已通過 → 目前輪到 → 在路上，連續編號；「順序」等同「進度」；小編用「順序 B3」；無關身分被拒絕", async () => {
+test("關主看預定來訪順序：照路線設定排（第幾關、組別號碼），每組標上實際進度；「順序」等同「進度」；小編用「順序 B3」；無關身分被拒絕", async () => {
   await resetGame();
   await commandRouter.route("Ub3referee", "我是 B3 關主");
-  for (const [user, group] of [["Ul1", 1], ["Ul2", 2]]) {
-    await commandRouter.route(user, `報到 ${group}組`);
-    await commandRouter.route(ADMIN, `出發 ${group}組`);
-  }
-  // 兩組路線不同：找出各自到 B3 的位置，讓第 1 組先走到 B3、通過；第 2 組留在路上
+
+  // 還沒有任何隊伍報到：預定順序照樣列出，全部是尚未報到
+  const empty = textsOf(await commandRouter.route("Ub3referee", "進度"))[0];
+  assert.match(empty, /B3.*預定來訪順序/);
+
+  // 預期順序＝依「B3 是各組路線的第幾關」排，同一關再依組別號碼
+  const expected = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    .map((g) => ({ g, idx: getRoute(g).findIndex((s) => s.checkpointId === "B3") }))
+    .filter((x) => x.idx !== -1)
+    .sort((a, b) => a.idx - b.idx || a.g - b.g)
+    .map((x) => x.g);
+  const groupsInText = [...empty.matchAll(/[①-⑳] (\d+)組/g)].map((m) => Number(m[1]));
+  assert.deepEqual(groupsInText, expected);
+  assert.match(empty, /1組（第 \d+ 關）｜⏳ 尚未報到/);
+
+  // 第 1 組報到出發、走到 B3 並通過；第 2 組報到出發，還在路上
+  await commandRouter.route("Ul1", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
   const idx1 = getRoute(1).findIndex((s) => s.checkpointId === "B3");
   for (let i = 0; i < idx1; i++) await commandRouter.route(ADMIN, "通過 1組");
-  const idx2 = getRoute(2).findIndex((s) => s.checkpointId === "B3");
-  assert.ok(idx2 > 0, "測試前提：第 2 組的路線上 B3 不是第一關");
+  await commandRouter.route("Ul2", "報到 2組");
+  await commandRouter.route(ADMIN, "出發 2組");
+  await commandRouter.route("Ul3", "報到 3組"); // 報到了但還沒出發
 
-  const beforePass = textsOf(await commandRouter.route("Ub3referee", "順序"))[0];
-  assert.match(beforePass, /來訪順序/);
-  const waitingPos = beforePass.indexOf("1組｜✋ 已抵達，等待確認");
-  const enRoutePos = beforePass.indexOf("2組｜🚶 已出發，還在路上");
-  assert.ok(waitingPos > -1 && enRoutePos > waitingPos, "目前輪到的排在還在路上的前面");
-  assert.match(beforePass, /出發前往）/);
+  const mid = textsOf(await commandRouter.route("Ub3referee", "順序"))[0];
+  assert.match(mid, /現在等您確認：1組/);
+  assert.match(mid, /1組（第 \d+ 關）｜✋ 已抵達，等待確認/);
+  assert.match(mid, /2組（第 \d+ 關）｜🚶 已出發，還在路上（還差 \d+ 關）/);
+  assert.match(mid, /3組（第 \d+ 關）｜⏳ 尚未出發/);
 
-  await commandRouter.route(ADMIN, "通過 1組"); // 第 1 組通過 B3
-  const afterPass = textsOf(await commandRouter.route("Ub3referee", "組別順序"))[0];
-  assert.match(afterPass, /① 1組｜✅ 已通過（\d{2}:\d{2}）/);
-  assert.match(afterPass, /② 2組｜🚶/);
+  await commandRouter.route(ADMIN, "通過 1組");
+  const after = textsOf(await commandRouter.route("Ub3referee", "組別順序"))[0];
+  assert.match(after, /1組（第 \d+ 關）｜✅ 已通過（\d{2}:\d{2}）/);
+  assert.doesNotMatch(after, /現在等您確認/);
 
   // 小編指定關卡（代號或名稱）；沒指定要提示；沒身分的人被拒絕
-  assert.match(textsOf(await commandRouter.route(ADMIN, "順序 b3"))[0], /B3.*來訪順序/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "順序 b3"))[0], /B3.*預定來訪順序/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "順序 救救菜英文"))[0], /B3.*預定來訪順序/);
   assert.match(textsOf(await commandRouter.route(ADMIN, "順序"))[0], /請指定關卡/);
   assert.match(textsOf(await commandRouter.route("Unobody", "順序"))[0], /僅限小編或登記過的關主使用/);
 });
@@ -820,7 +835,7 @@ test("關主自助登記：「我是 B3 關主」後可以用通過，但只對�
 
   // 關主現在也能查「進度」，但只看得到跟自己這關有關的組別——第1組已經通過 B3 了，不該再出現
   const refereeProgress = await commandRouter.route(STAFF, "進度");
-  assert.match(textsOf(refereeProgress)[0], /1組｜✅ 已通過/);
+  assert.match(textsOf(refereeProgress)[0], /1組（第 2 關）｜✅ 已通過/);
 });
 
 test("關主自助登記：同一帳號重新登記會覆蓋成新的關卡", async () => {

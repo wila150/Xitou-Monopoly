@@ -181,7 +181,7 @@ function refereeHelpMsg(checkpointId = null) {
   return textMsg(
     [
       title,
-      "• 進度（或「順序」）：查看來到您這關的隊伍順序——已通過的、目前輪到的、還在路上的，各組附上時間",
+      "• 進度（或「順序」）：查看這關的預定來訪順序（依路線設定排），每組標上實際進度",
       "• 通過 X組（例如「通過 1組」）：確認該組完成您這一關，解鎖下一關（只對您登記的這一關生效）",
       "• 關主報到（或關主綁定）／我是 XX 關主：想換負責的關卡時重新登記",
       "• 我的ID：查詢自己的 userId",
@@ -1393,10 +1393,10 @@ async function adminListProgress() {
   return [textMsg(`📋 目前進度\n${lines.join("\n")}`)];
 }
 
-// 關主專用的「進度」查詢：列出這一關的「來訪順序」，只看跟自己這關有關的組別，不洩漏其他關卡的細節。
-// 依序是：已經通過這關的（照通過時間）→ 目前輪到這關、等待確認的（照「被放行前往這關」的時間，先到先處理）
-// → 還在路上的（離這關越近越前面，同距離看誰先被放行），三段用連續編號串成一份完整順序。
-// 注意：系統沒有「實際抵達」的感應，時間都是系統紀錄的放行／通過時間，實際抵達順序以現場為準。
+// 關主專用的「進度」查詢：這一關的「預定來訪順序」——照路線設定排（先排第幾關會走到這裡，同一關再依組別號碼），
+// 每一組後面標上目前實際進度，關主一眼就能核對「該來的來了沒」。只列路線有經過這關的組別，
+// 不顯示其他關卡的細節。
+// 注意：系統沒有「實際抵達」的感應，「已抵達」是指這組已經輪到這關（上一關通過、還沒通過這關），實際位置以現場為準。
 const CIRCLED_NUMBERS = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
 function orderMark(n) {
   return n >= 1 && n <= CIRCLED_NUMBERS.length ? CIRCLED_NUMBERS[n - 1] : `${n}.`;
@@ -1406,58 +1406,47 @@ async function refereeListProgress(checkpointId) {
   const cp = getCheckpoint(checkpointId);
   const groupNos = getAllGroupNos();
   const teams = await Promise.all(groupNos.map((groupNo) => findTeam(db, groupNo)));
-  const logRows = await db.all("SELECT group_no, checkpoint_index, checkpoint_id, passed_at FROM checkpoint_log");
-  const passedAtByStep = new Map(logRows.map((r) => [`${r.group_no}:${r.checkpoint_index}`, r.passed_at]));
+  const passedRows = await db.all("SELECT group_no, passed_at FROM checkpoint_log WHERE checkpoint_id = ?", [
+    checkpointId,
+  ]);
+  const passedAtByGroup = new Map(passedRows.map((r) => [r.group_no, r.passed_at]));
 
-  const passed = logRows
-    .filter((r) => r.checkpoint_id === checkpointId)
-    .sort((a, b) => a.passed_at.localeCompare(b.passed_at));
-  const waiting = [];
-  const enRoute = [];
+  const planned = [];
   for (let i = 0; i < groupNos.length; i++) {
-    const team = teams[i];
-    if (!team || team.status === "CHECKED_IN" || team.status === "FINISHED") continue;
-    const route = getRoute(groupNos[i]);
-    const idx = route.findIndex((s) => s.checkpointId === checkpointId);
-    if (idx === -1 || team.current_index > idx) continue; // 路線沒經過這關，或已經通過這關了（見 passed）
-    const releasedAt =
-      team.current_index === 0 ? team.start_time : passedAtByStep.get(`${team.group_no}:${team.current_index - 1}`);
-    if (team.current_index === idx) {
-      waiting.push({ groupNo: groupNos[i], releasedAt });
+    const idx = getRoute(groupNos[i]).findIndex((s) => s.checkpointId === checkpointId);
+    if (idx !== -1) planned.push({ groupNo: groupNos[i], idx, team: teams[i] });
+  }
+  planned.sort((a, b) => a.idx - b.idx || a.groupNo - b.groupNo);
+  if (planned.length === 0) {
+    return [textMsg(`📋 ${cp.id}｜${cp.name}\n目前的路線設定裡沒有任何組別會經過這一關。`)];
+  }
+
+  const waitingGroups = [];
+  const lines = planned.map(({ groupNo, idx, team }, i) => {
+    let status;
+    if (passedAtByGroup.has(groupNo)) {
+      status = `✅ 已通過（${taipeiTime(passedAtByGroup.get(groupNo))}）`;
+    } else if (!team) {
+      status = "⏳ 尚未報到";
+    } else if (team.status === "CHECKED_IN") {
+      status = "⏳ 尚未出發";
+    } else if (team.status === "FINISHED") {
+      status = "🏁 已結束";
+    } else if (team.current_index === idx) {
+      status = "✋ 已抵達，等待確認";
+      waitingGroups.push(groupNo);
     } else {
-      enRoute.push({ groupNo: groupNos[i], releasedAt, remaining: idx - team.current_index });
+      status = `🚶 已出發，還在路上（還差 ${idx - team.current_index} 關）`;
     }
-  }
-  waiting.sort((a, b) => String(a.releasedAt).localeCompare(String(b.releasedAt)));
-  enRoute.sort((a, b) => a.remaining - b.remaining || String(a.releasedAt).localeCompare(String(b.releasedAt)));
+    return `${orderMark(i + 1)} ${groupNo}組（第 ${idx + 1} 關）｜${status}`;
+  });
 
-  if (passed.length + waiting.length + enRoute.length === 0) {
-    return [textMsg(`📋 ${cp.id}｜${cp.name}\n目前沒有隊伍在路上或抵達，稍後再查詢看看。`)];
+  const out = [`📋 ${cp.id}｜${cp.name}｜預定來訪順序`, "（依路線設定排列，括號是該組的第幾關）", ""];
+  if (waitingGroups.length > 0) {
+    out.push(`👉 現在等您確認：${waitingGroups.map((g) => `${g}組`).join("、")}`, "");
   }
-
-  let n = 0;
-  const lines = [`📋 ${cp.id}｜${cp.name}｜來訪順序`];
-  if (passed.length > 0) {
-    lines.push("", "✅ 已通過");
-    for (const r of passed) {
-      lines.push(`${orderMark(++n)} ${r.group_no}組｜✅ 已通過（${taipeiTime(r.passed_at)}）`);
-    }
-  }
-  if (waiting.length > 0) {
-    lines.push("", "✋ 目前輪到這關");
-    for (const w of waiting) {
-      const since = w.releasedAt ? `（${taipeiTime(w.releasedAt)} 出發前往）` : "";
-      lines.push(`${orderMark(++n)} ${w.groupNo}組｜✋ 已抵達，等待確認${since}`);
-    }
-  }
-  if (enRoute.length > 0) {
-    lines.push("", "🚶 在路上（離這關近的排前面）");
-    for (const e of enRoute) {
-      lines.push(`${orderMark(++n)} ${e.groupNo}組｜🚶 已出發，還在路上（還差 ${e.remaining} 關）`);
-    }
-  }
-  lines.push("", "ℹ️ 時間為系統紀錄的放行／通過時間，實際抵達順序以現場為準。");
-  return [textMsg(lines.join("\n"))];
+  out.push(...lines);
+  return [textMsg(out.join("\n"))];
 }
 
 // 小編也能查某一關的來訪順序（關主是用自己登記的那關），輸入關卡代號或名稱
