@@ -239,6 +239,8 @@ function adminHelpMsg() {
       "• 遊戲結束：手動停止受理新的關卡進度（一般用不到——逾時的隊伍仍可繼續闖關，成績會標註逾時）",
       "• 排行榜開啟／排行榜關閉：控制排行榜是否公開",
       "• 處理緊急 N：接手處理某則緊急聯絡（收到警報時直接點訊息底下的「我來處理」按鈕即可）",
+      "• 指定關主 B3 阿美：直接幫某人綁定成關主（名字打 LINE 顯示名稱的一部分或 userId 末 6 碼；對方要先傳過任何訊息給官方帳號）",
+      "• 取消關主 阿美／指定總領隊 阿美／取消總領隊 阿美：同上",
       "• 推播（隊長／關主／所有人）：小編不用登記就能用",
       "• 重置關主／重置總領隊：清空登記",
       "• 重置遊戲 → 重置遊戲 確認：清空整場資料（不含關主與總領隊登記）",
@@ -847,6 +849,70 @@ async function resetBroadcasters() {
 }
 
 // 給後台網頁看目前有哪些人登記成總領隊（不含 userId 全碼，只顯示末 6 碼方便辨識，保留一點隱私）
+// 用 LINE 指令指定關主／總領隊時，從「傳過訊息給官方帳號的人」裡找人：
+// 可以打完整 userId、userId 末 6 碼以上、或 LINE 顯示名稱（完全相同優先，其次名稱包含關鍵字）。
+// 回傳 { status: "ok", user } ／ { status: "none" } ／ { status: "ambiguous", candidates }
+async function findLineUser(query) {
+  const q = String(query || "").trim();
+  if (!q) return { status: "none" };
+  const users = await db.all("SELECT user_id, display_name FROM line_users ORDER BY last_seen_at DESC");
+  const lower = q.toLowerCase();
+
+  const byId = users.filter((u) => u.user_id === q);
+  if (byId.length === 1) return { status: "ok", user: byId[0] };
+
+  // 末碼：至少 6 個英數字才當作 userId 片段，避免「小明」之類的名字被誤判
+  const bySuffix = /^[A-Za-z0-9]{6,}$/.test(q) ? users.filter((u) => u.user_id.toLowerCase().endsWith(lower)) : [];
+  if (bySuffix.length === 1) return { status: "ok", user: bySuffix[0] };
+  if (bySuffix.length > 1) return { status: "ambiguous", candidates: bySuffix.slice(0, 5) };
+
+  const exact = users.filter((u) => (u.display_name || "").toLowerCase() === lower);
+  if (exact.length === 1) return { status: "ok", user: exact[0] };
+  if (exact.length > 1) return { status: "ambiguous", candidates: exact.slice(0, 5) };
+
+  const partial = users.filter((u) => (u.display_name || "").toLowerCase().includes(lower));
+  if (partial.length === 1) return { status: "ok", user: partial[0] };
+  if (partial.length > 1) return { status: "ambiguous", candidates: partial.slice(0, 5) };
+  return { status: "none" };
+}
+
+function lineUserDisplay(u) {
+  return `${u.display_name || "（未取得名稱）"} …${u.user_id.slice(-6)}`;
+}
+
+// 小編用 LINE 指令指定／取消關主與總領隊（後台網頁有同樣功能）。找不到人、名字重複時提示怎麼改打。
+// 對方至少要傳過一句話給官方帳號才找得到（LINE 沒有列出全部好友的 API）。
+async function adminRoleCommand(kind, action, query, checkpointId = null) {
+  const found = await findLineUser(query);
+  if (found.status === "none") {
+    return {
+      reply: [
+        textMsg(
+          `🔎 找不到「${query}」。對方需要先傳任何一句話給官方帳號（例如「我的ID」），才找得到人；名字可以打 LINE 顯示名稱的一部分，或 userId 末 6 碼以上。`
+        ),
+      ],
+    };
+  }
+  if (found.status === "ambiguous") {
+    const list = found.candidates.map((u, i) => `${i + 1}. ${lineUserDisplay(u)}`).join("\n");
+    return {
+      reply: [textMsg(`🤔 符合的人不只一位，請改打 userId 末 6 碼指定：\n${list}`)],
+    };
+  }
+  const { user } = found;
+  let result;
+  if (kind === "referee") {
+    result = action === "assign" ? await assignReferee(user.user_id, checkpointId) : await removeReferee(user.user_id);
+  } else {
+    result = action === "assign" ? await assignBroadcaster(user.user_id) : await removeBroadcaster(user.user_id);
+  }
+  if (!result.ok) return { reply: [textMsg(`⚠️ ${lineUserDisplay(user)}：${result.error}`)] };
+  return {
+    reply: [textMsg(`✅ ${lineUserDisplay(user)} ${result.message}，已通知對方。`)],
+    directPushes: result.pushes,
+  };
+}
+
 // 後台「指定關主／總領隊」用的人員清單：最近有互動的排前面，並標出每個人目前的身分，避免指定到已在隊伍裡的人
 async function listLineUsers() {
   const rows = await db.all(
@@ -1767,6 +1833,7 @@ module.exports = {
   assignBroadcaster,
   removeBroadcaster,
   listLineUsers,
+  adminRoleCommand,
   usageGuideFor,
   tryRefereeBareRegistration,
   getRefereeCheckpoint,

@@ -1292,3 +1292,88 @@ test("一鍵通過按鈕：隊伍上傳照片時登記在該關的關主也會�
   assert.match(textsOf(await commandRouter.route("Ub3ref", items[0].action.text))[0], /已為第 1 組確認/);
   assert.equal((await commandRouter.route("Ub3ref", "進度")).reply[0].quickReply, undefined);
 });
+
+test("小編用 LINE 指令綁定關主／總領隊：指定關主 B3 名字（或 userId 末碼），找不到、重名、隊伍成員、非小編都有清楚提示，可取消", async () => {
+  await resetGame();
+  const lineUserStore = require("../src/config/lineUserStore");
+  await dbModule.db.run("DELETE FROM line_users");
+  const seed = async (id, name) => {
+    await lineUserStore.touch(id);
+    if (name) await lineUserStore.setDisplayName(id, name);
+  };
+  await seed("Uaaaa111111", "阿美");
+  await seed("Ubbbb222222", "小華");
+  await seed("Ucccc333333", "小華媽媽");
+  await seed("Udddd444444", "Amy Chen");
+  await seed("Ueeee555555", "Amy Lin");
+  await seed("Unoname66666", null);
+
+  // 用名字指定：成功，回覆確認、推播通知給對方（含關主指令說明），立刻生效
+  const assign = await commandRouter.route(ADMIN, "指定關主 B3 阿美");
+  assert.match(textsOf(assign)[0], /阿美 …111111 已指定為「.*」（B3）的關主，已通知對方/);
+  assert.equal(assign.directPushes[0].to, "Uaaaa111111");
+  assert.match(assign.directPushes[0].messages[0].text, /小編已指定您擔任.*B3/);
+  assert.equal(await teamService.getRefereeCheckpoint("Uaaaa111111"), "B3");
+  assert.match(textsOf(await commandRouter.route("Uaaaa111111", "進度"))[0], /B3.*預定來訪順序/);
+
+  // 關卡代號不分大小寫；名稱可以只打一部分；完全相同優先於部分符合（「小華」不會誤選「小華媽媽」）
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定關主 b4 小華"))[0], /小華 …222222 已指定為.*B4/);
+  assert.equal(await teamService.getRefereeCheckpoint("Ubbbb222222"), "B4");
+
+  // 部分名稱只符合一位：成功；用 userId 末碼（6 碼以上）也可以，沒有名稱的人靠這個
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定關主 D6 媽媽"))[0], /小華媽媽 …333333/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定關主 C4 noname66666"))[0], /（未取得名稱） …e66666 已指定為.*C4/);
+  assert.equal(await teamService.getRefereeCheckpoint("Unoname66666"), "C4");
+
+  // 重名：列出候選、提示改打末碼，不會亂選
+  const ambiguous = await commandRouter.route(ADMIN, "指定關主 A2 amy");
+  assert.match(textsOf(ambiguous)[0], /符合的人不只一位/);
+  assert.match(textsOf(ambiguous)[0], /Amy Chen …444444/);
+  assert.match(textsOf(ambiguous)[0], /Amy Lin …555555/);
+  assert.equal(ambiguous.directPushes.length, 0);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定關主 A2 444444"))[0], /Amy Chen …444444 已指定/);
+
+  // 找不到：提示對方要先傳訊息給官方帳號
+  const none = await commandRouter.route(ADMIN, "指定關主 B3 不存在的人");
+  assert.match(textsOf(none)[0], /找不到「不存在的人」.*先傳任何一句話/);
+
+  // 不存在的關卡、已在隊伍裡的人
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定關主 Z9 阿美"))[0], /找不到關卡代號/);
+  await commandRouter.route("Umember1", "報到 1組");
+  await lineUserStore.backfill();
+  await lineUserStore.setDisplayName("Umember1", "隊員甲");
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定關主 B3 隊員甲"))[0], /已經是第 1 組的成員/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "指定總領隊 隊員甲"))[0], /已經是第 1 組的成員/);
+
+  // 非小編（包含關主、總領隊本人）不能用這些指令
+  await commandRouter.route("Ubroadcaster", "總領綁定");
+  for (const who of ["Ustranger", "Uaaaa111111", "Ubroadcaster"]) {
+    for (const cmd of ["指定關主 B3 小華", "取消關主 阿美", "指定總領隊 小華", "取消總領隊 阿美"]) {
+      assert.match(textsOf(await commandRouter.route(who, cmd))[0], /僅限小編使用/, `${who} 執行「${cmd}」`);
+    }
+  }
+  assert.equal(await teamService.getRefereeCheckpoint("Ubbbb222222"), "B4", "被擋下的指令沒有改到任何人");
+
+  // 總領隊：指定後能推播，取消後失效並通知對方
+  const boss = await commandRouter.route(ADMIN, "指定總領隊 小華媽媽");
+  assert.match(textsOf(boss)[0], /小華媽媽 …333333 已指定為總領隊/);
+  assert.match(boss.directPushes[0].messages[0].text, /指定您擔任總領隊/);
+  assert.ok(await teamService.isBroadcaster("Ucccc333333"));
+  const cancelBoss = await commandRouter.route(ADMIN, "取消總領隊 小華媽媽");
+  assert.match(textsOf(cancelBoss)[0], /已取消總領隊/);
+  assert.match(cancelBoss.directPushes[0].messages[0].text, /已取消您的總領隊身分/);
+  assert.ok(!(await teamService.isBroadcaster("Ucccc333333")));
+  assert.match(textsOf(await commandRouter.route(ADMIN, "取消總領隊 小華媽媽"))[0], /目前不是總領隊/);
+
+  // 取消關主：對方收到通知、不再是關主；再取消提示不是關主
+  const cancel = await commandRouter.route(ADMIN, "取消關主 阿美");
+  assert.match(textsOf(cancel)[0], /阿美 …111111 已取消 B3 關主/);
+  assert.match(cancel.directPushes[0].messages[0].text, /已取消您的關主身分/);
+  assert.equal(await teamService.getRefereeCheckpoint("Uaaaa111111"), null);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "取消關主 阿美"))[0], /目前不是關主/);
+
+  // 小編的說明列出這幾個指令，別人的說明沒有
+  assert.match(textsOf(await commandRouter.route(ADMIN, "使用說明")).join("\n"), /指定關主 B3 阿美/);
+  assert.doesNotMatch(textsOf(await commandRouter.route("Umember1", "使用說明")).join("\n"), /指定關主/);
+  await dbModule.db.run("DELETE FROM line_users");
+});

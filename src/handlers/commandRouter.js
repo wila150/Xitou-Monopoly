@@ -65,6 +65,11 @@ const PENDING_BROADCAST_TTL_MS = 3 * 60 * 1000;
 const EMERGENCY_RE = /^(?:緊急聯絡|緊急求助)(?:[\s:：]+([\s\S]+))?$/;
 // 小編接手：「處理緊急 3」「處理緊急 #3」，LINE 警報訊息底下的「我來處理」按鈕會送出這句
 const HANDLE_EMERGENCY_RE = /^處理緊急\s*#?\s*([0-9]+)$/;
+// 小編用 LINE 指令直接綁定：「指定關主 B3 阿美」「取消關主 阿美」「指定總領隊 阿美」「取消總領隊 阿美」
+const ASSIGN_REFEREE_RE = /^指定關主\s+([A-Za-z]\d)\s+(.+)$/;
+const CANCEL_REFEREE_RE = /^取消關主\s+(.+)$/;
+const ASSIGN_BROADCASTER_RE = /^指定總領隊\s+(.+)$/;
+const CANCEL_BROADCASTER_RE = /^取消總領隊\s+(.+)$/;
 const ORDER_RE = /^(?:組別)?順序(?:\s+(.+))?$/;
 const TRANSFER_REQUEST_RE = verbGroupRegex("接任隊長");
 const TRANSFER_CONFIRM_RE = verbGroupRegex("確認換隊長");
@@ -396,6 +401,20 @@ async function route(userId, rawText) {
   if (text === "重置關主") {
     if (!isAdmin(userId)) return adminOnlyDenied();
     return withReply(await teamService.resetReferees());
+  }
+
+  const roleCommands = [
+    [ASSIGN_REFEREE_RE, (m) => teamService.adminRoleCommand("referee", "assign", m[2].trim(), m[1].toUpperCase())],
+    [CANCEL_REFEREE_RE, (m) => teamService.adminRoleCommand("referee", "remove", m[1].trim())],
+    [ASSIGN_BROADCASTER_RE, (m) => teamService.adminRoleCommand("broadcaster", "assign", m[1].trim())],
+    [CANCEL_BROADCASTER_RE, (m) => teamService.adminRoleCommand("broadcaster", "remove", m[1].trim())],
+  ];
+  for (const [re, run] of roleCommands) {
+    const roleMatch = text.match(re);
+    if (!roleMatch) continue;
+    if (!isAdmin(userId)) return adminOnlyDenied();
+    const result = await run(roleMatch);
+    return { reply: result.reply, groupBroadcasts: [], directPushes: result.directPushes || [] };
   }
 
   if (text === "重置總領隊") {
