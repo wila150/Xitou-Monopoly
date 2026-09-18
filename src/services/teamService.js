@@ -576,7 +576,7 @@ async function listTeamLeaders() {
   }));
 }
 
-// ---- 三之五、總領隊自助登記與群發（不需要是 ADMIN_USER_IDS，也能對所有小隊長廣播）----
+// ---- 三之五、總領隊自助登記與推播（不需要是 ADMIN_USER_IDS，也能對隊長／關主／所有人推播）----
 
 async function registerBroadcaster(userId) {
   const membership = await findMembership(db, userId);
@@ -595,7 +595,9 @@ async function registerBroadcaster(userId) {
   );
 
   return [
-    textMsg("✅ 已登記為總領隊，之後輸入「群發 訊息內容」即可對所有小隊長發送訊息。"),
+    textMsg(
+      "✅ 已登記為總領隊。之後輸入「推播」即可選擇對象（隊長、關主、所有人）發送訊息，也可以直接輸入「推播 隊長」再打內容，或一次打完「推播 隊長 訊息內容」。"
+    ),
   ];
 }
 
@@ -621,21 +623,40 @@ async function listBroadcasters() {
   }));
 }
 
-// 對所有「目前有隊長的組別」廣播一則文字訊息（尚未有人報到、還沒產生隊長的組不會收到）
-async function broadcastToLeaders(text) {
+// 推播對象：leader＝各組目前的隊長、referee＝所有登記過的關主、all＝所有隊伍成員（隊長＋隊員）加上關主（去重複）
+const BROADCAST_TARGET_LABELS = { leader: "小隊長", referee: "關主", all: "所有人" };
+
+async function resolveBroadcastRecipients(target) {
+  if (target === "leader") {
+    const rows = await db.all("SELECT leader_user_id AS id FROM teams WHERE leader_user_id IS NOT NULL");
+    return rows.map((r) => r.id);
+  }
+  if (target === "referee") {
+    const rows = await db.all("SELECT user_id AS id FROM referees");
+    return rows.map((r) => r.id);
+  }
   const rows = await db.all(
-    "SELECT leader_user_id FROM teams WHERE leader_user_id IS NOT NULL"
+    "SELECT user_id AS id FROM team_members UNION SELECT user_id AS id FROM referees"
   );
+  return rows.map((r) => r.id);
+}
+
+// 總領隊／小編的「推播」：依對象（leader／referee／all）對一群人各推一則文字訊息。
+// 推播則數 = 收件人數（LINE 計費以請求次數 x 收件人數計算），「所有人」會比只推隊長多很多，請留意額度。
+async function broadcastMessage(target, text) {
+  const label = BROADCAST_TARGET_LABELS[target];
+  const ids = await resolveBroadcastRecipients(target);
   const message = textMsg(`📢 總領隊訊息\n${text}`);
-  const directPushes = rows.map((r) => ({ to: r.leader_user_id, messages: [message] }));
-  const reply = [
-    textMsg(
-      rows.length > 0
-        ? `📢 已群發給 ${rows.length} 位小隊長。`
-        : "⚠️ 目前尚無隊伍報到，沒有小隊長可以接收群發。"
-    ),
-  ];
-  return { reply, directPushes };
+  const directPushes = ids.map((id) => ({ to: id, messages: [message] }));
+  let replyText;
+  if (ids.length === 0) {
+    replyText = `⚠️ 目前沒有可以接收推播的${label}（尚未有人報到或登記）。`;
+  } else if (target === "all") {
+    replyText = `📢 已推播給所有人（共 ${ids.length} 位）。`;
+  } else {
+    replyText = `📢 已推播給 ${ids.length} 位${label}。`;
+  }
+  return { reply: [textMsg(replyText)], directPushes };
 }
 
 // ---- 三之四、退回一關（更正「通過」／「到站」誤觸或手滑重複的情況）----
@@ -1150,7 +1171,8 @@ module.exports = {
   isBroadcaster,
   resetBroadcasters,
   listBroadcasters,
-  broadcastToLeaders,
+  broadcastMessage,
+  BROADCAST_TARGET_LABELS,
   revertLastCheckpoint,
   finishAtB6,
   freezeProgress,

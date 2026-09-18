@@ -35,6 +35,7 @@ async function resetGame() {
   await commandRouter.route(ADMIN, "重置遊戲 確認");
   await teamService.resetReferees();
   await teamService.resetBroadcasters();
+  commandRouter.resetPendingBroadcasts();
 }
 
 function textsOf(result) {
@@ -749,11 +750,78 @@ test("總領隊自助登記：登記後可以用「群發」對所有小隊長�
   assert.equal(list[0].userIdSuffix, STAFF.slice(-6));
 
   const broadcast = await commandRouter.route(STAFF, "群發 明天集合時間改成早上八點");
-  assert.match(textsOf(broadcast)[0], /已群發給 2 位小隊長/);
+  assert.match(textsOf(broadcast)[0], /已推播給 2 位小隊長/);
   assert.equal(broadcast.directPushes.length, 2);
   const targets = broadcast.directPushes.map((p) => p.to).sort();
   assert.deepEqual(targets, ["Uleader1", "Uleader2"]);
   assert.match(broadcast.directPushes[0].messages[0].text, /明天集合時間改成早上八點/);
+});
+
+test("推播：一行打完「推播 對象 內容」，對象可以是隊長、關主、所有人", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader1", "報到 1組");
+  await commandRouter.route("Umember1", "報到 1組");
+  await commandRouter.route("Uleader2", "報到 2組");
+  await commandRouter.route("Ureferee", "我是 B3 關主");
+  await commandRouter.route(STAFF, "總領綁定");
+
+  const toLeaders = await commandRouter.route(STAFF, "推播 隊長 集合時間改到九點");
+  assert.match(textsOf(toLeaders)[0], /已推播給 2 位小隊長/);
+  assert.deepEqual(toLeaders.directPushes.map((p) => p.to).sort(), ["Uleader1", "Uleader2"]);
+  assert.match(toLeaders.directPushes[0].messages[0].text, /集合時間改到九點/);
+
+  const toReferees = await commandRouter.route(STAFF, "推播 關主 請提早就位");
+  assert.match(textsOf(toReferees)[0], /已推播給 1 位關主/);
+  assert.deepEqual(toReferees.directPushes.map((p) => p.to), ["Ureferee"]);
+
+  const toAll = await commandRouter.route(STAFF, "推播 所有人 午餐提前");
+  assert.match(textsOf(toAll)[0], /已推播給所有人（共 4 位）/);
+  assert.deepEqual(
+    toAll.directPushes.map((p) => p.to).sort(),
+    ["Ureferee", "Uleader1", "Uleader2", "Umember1"].sort()
+  );
+});
+
+test("推播：先打「推播 隊長」，下一則訊息就是內容；也可以只打「推播」再依序輸入對象與內容", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader1", "報到 1組");
+  await commandRouter.route("Ureferee", "我是 B3 關主");
+  await commandRouter.route(STAFF, "總領綁定");
+
+  const ask = await commandRouter.route(STAFF, "推播 隊長");
+  assert.match(textsOf(ask)[0], /請輸入要推播給「小隊長」的訊息內容/);
+  const sent = await commandRouter.route(STAFF, "下午三點在大門口集合");
+  assert.match(textsOf(sent)[0], /已推播給 1 位小隊長/);
+  assert.match(sent.directPushes[0].messages[0].text, /下午三點在大門口集合/);
+
+  // 送出後狀態清除：下一則訊息回到一般指令流程，不會再被當成推播內容
+  const after = await commandRouter.route(STAFF, "我的ID");
+  assert.match(textsOf(after)[0], /userId/);
+
+  const askTarget = await commandRouter.route(STAFF, "推播");
+  assert.match(textsOf(askTarget)[0], /請輸入推播對象：隊長、關主、所有人/);
+  const badTarget = await commandRouter.route(STAFF, "隊員");
+  assert.match(textsOf(badTarget)[0], /看不懂這個對象/);
+  const askContent = await commandRouter.route(STAFF, "關主");
+  assert.match(textsOf(askContent)[0], /請輸入要推播給「關主」的訊息內容/);
+  const sentToReferee = await commandRouter.route(STAFF, "請到現場集合");
+  assert.match(textsOf(sentToReferee)[0], /已推播給 1 位關主/);
+  assert.equal(sentToReferee.directPushes[0].to, "Ureferee");
+});
+
+test("推播：輸入「取消」可以放棄；沒有權限的人不能開始推播流程", async () => {
+  await resetGame();
+  await commandRouter.route(STAFF, "總領綁定");
+  await commandRouter.route(STAFF, "推播 所有人");
+  const cancelled = await commandRouter.route(STAFF, "取消");
+  assert.match(textsOf(cancelled)[0], /已取消推播/);
+  const next = await commandRouter.route(STAFF, "我的ID");
+  assert.match(textsOf(next)[0], /userId/);
+
+  const denied = await commandRouter.route("Unobody", "推播 所有人 測試");
+  assert.match(textsOf(denied)[0], /僅限小編或登記過的總領隊使用/);
+  const deniedStart = await commandRouter.route("Unobody", "推播");
+  assert.match(textsOf(deniedStart)[0], /僅限小編或登記過的總領隊使用/);
 });
 
 test("總領隊自助登記：已經報到綁定隊伍的人不能登記成總領隊；小編不用登記就能直接群發", async () => {
@@ -764,7 +832,7 @@ test("總領隊自助登記：已經報到綁定隊伍的人不能登記成總�
   assert.match(textsOf(denied)[0], /已經是第 1 組的成員，無法同時登記為總領隊/);
 
   const broadcast = await commandRouter.route(ADMIN, "群發 測試訊息");
-  assert.match(textsOf(broadcast)[0], /已群發給 1 位小隊長/);
+  assert.match(textsOf(broadcast)[0], /已推播給 1 位小隊長/);
 });
 
 test("重置總領隊：小編可以清空所有總領隊登記，非小編不能用", async () => {

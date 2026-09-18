@@ -42,7 +42,21 @@ const ARRIVE_RE = verbGroupRegex("到站");
 const APPROVE_RE = verbGroupRegex("通過");
 const REVERT_RE = verbGroupRegex("退回");
 const REGISTER_REFEREE_RE = /^我是\s*([A-Za-z]\d)\s*關主$/;
-const BROADCAST_RE = /^群發\s+([\s\S]+)$/;
+// 推播（總領隊／小編）：「推播」「推播 隊長」「推播 隊長 訊息內容」，「群發」是同義詞；
+// 對象可以省略（省略就是推給隊長，等同舊版「群發 訊息內容」），也可以分兩步：先指定對象，下一則訊息才是內容。
+const BROADCAST_RE = /^(?:推播|群發)(?:\s+([\s\S]+))?$/;
+const BROADCAST_TARGET_ALIASES = {
+  隊長: "leader",
+  小隊長: "leader",
+  關主: "referee",
+  所有人: "all",
+  全部: "all",
+  全體: "all",
+};
+const BROADCAST_TARGET_PATTERN = Object.keys(BROADCAST_TARGET_ALIASES).join("|");
+const BROADCAST_TARGET_ONLY_RE = new RegExp(`^(${BROADCAST_TARGET_PATTERN})$`);
+const BROADCAST_TARGET_WITH_CONTENT_RE = new RegExp(`^(${BROADCAST_TARGET_PATTERN})\\s+([\\s\\S]+)$`);
+const PENDING_BROADCAST_TTL_MS = 3 * 60 * 1000;
 const TRANSFER_REQUEST_RE = verbGroupRegex("接任隊長");
 const TRANSFER_CONFIRM_RE = verbGroupRegex("確認換隊長");
 const UNBIND_RE = verbGroupRegex("解除綁定");
@@ -68,6 +82,65 @@ function broadcastOnlyDenied() {
   ]);
 }
 
+// 「推播」的兩步驟對話狀態（userId -> { stage: "target"|"content", target, expiresAt }）。
+// 只是幾分鐘內的暫存對話，存記憶體就夠了；伺服器重啟或逾時就當作沒發生過，重新輸入「推播」即可。
+const pendingBroadcasts = new Map();
+
+function resetPendingBroadcasts() {
+  pendingBroadcasts.clear();
+}
+
+async function canBroadcast(userId) {
+  return isAdmin(userId) || (await teamService.isBroadcaster(userId));
+}
+
+async function sendBroadcast(userId, target, content) {
+  if (!(await canBroadcast(userId))) return broadcastOnlyDenied();
+  const result = await teamService.broadcastMessage(target, content);
+  return { reply: result.reply, groupBroadcasts: [], directPushes: result.directPushes };
+}
+
+function targetPrompt() {
+  return withReply([
+    teamService.textMsg(
+      "📢 請輸入推播對象：隊長、關主、所有人\n（輸入「取消」可放棄；也可以直接打「推播 隊長 訊息內容」一次完成）"
+    ),
+  ]);
+}
+
+function contentPrompt(target) {
+  const label = teamService.BROADCAST_TARGET_LABELS[target];
+  return withReply([
+    teamService.textMsg(
+      `✍️ 請輸入要推播給「${label}」的訊息內容\n（您的下一則訊息會直接當作推播內容送出；輸入「取消」可放棄）`
+    ),
+  ]);
+}
+
+// 使用者處在「推播」兩步驟對話中：下一則文字訊息就是對象或內容，不再走一般指令比對
+async function handlePendingBroadcast(userId, text, pending) {
+  if (text === "取消") {
+    pendingBroadcasts.delete(userId);
+    return withReply([teamService.textMsg("已取消推播。")]);
+  }
+  if (pending.stage === "target") {
+    const key = BROADCAST_TARGET_ALIASES[text];
+    if (!key) {
+      return withReply([
+        teamService.textMsg("⚠️ 看不懂這個對象，請輸入：隊長、關主、所有人（或輸入「取消」放棄）。"),
+      ]);
+    }
+    pendingBroadcasts.set(userId, {
+      stage: "content",
+      target: key,
+      expiresAt: Date.now() + PENDING_BROADCAST_TTL_MS,
+    });
+    return contentPrompt(key);
+  }
+  pendingBroadcasts.delete(userId);
+  return sendBroadcast(userId, pending.target, text);
+}
+
 // 將 teamService 各函式回傳的訊息，統一整理成
 // { reply, groupBroadcasts, directPushes } 供 index.js 送出
 async function route(userId, rawText) {
@@ -75,6 +148,14 @@ async function route(userId, rawText) {
 
   let m;
   let groupNo;
+
+  const pending = pendingBroadcasts.get(userId);
+  if (pending) {
+    if (pending.expiresAt > Date.now()) {
+      return handlePendingBroadcast(userId, text, pending);
+    }
+    pendingBroadcasts.delete(userId);
+  }
 
   if (text === "我的ID" || text === "我的id" || text === "我的Id") {
     // 查詢自己的 LINE userId，方便小編設定 ADMIN_USER_IDS 或關主／總領隊排查問題用，任何人都可以查自己的
@@ -129,17 +210,37 @@ async function route(userId, rawText) {
   }
 
   if (text === "總領綁定") {
-    // 總領隊自助登記：不需要是 ADMIN_USER_IDS，登記後可以用「群發 訊息」對所有小隊長廣播
+    // 總領隊自助登記：不需要是 ADMIN_USER_IDS，登記後可以用「推播」對隊長／關主／所有人發訊息
     return withReply(await teamService.registerBroadcaster(userId));
   }
 
   if ((m = text.match(BROADCAST_RE))) {
-    // 小編或登記過的總領隊：對所有小隊長廣播一則文字訊息
-    if (!isAdmin(userId) && !(await teamService.isBroadcaster(userId))) {
-      return broadcastOnlyDenied();
+    // 小編或登記過的總領隊：對隊長／關主／所有人推播文字訊息
+    if (!(await canBroadcast(userId))) return broadcastOnlyDenied();
+    const rest = m[1];
+    if (!rest) {
+      pendingBroadcasts.set(userId, {
+        stage: "target",
+        expiresAt: Date.now() + PENDING_BROADCAST_TTL_MS,
+      });
+      return targetPrompt();
     }
-    const result = await teamService.broadcastToLeaders(m[1]);
-    return { reply: result.reply, groupBroadcasts: [], directPushes: result.directPushes };
+    const targetOnly = rest.match(BROADCAST_TARGET_ONLY_RE);
+    if (targetOnly) {
+      const key = BROADCAST_TARGET_ALIASES[targetOnly[1]];
+      pendingBroadcasts.set(userId, {
+        stage: "content",
+        target: key,
+        expiresAt: Date.now() + PENDING_BROADCAST_TTL_MS,
+      });
+      return contentPrompt(key);
+    }
+    const withContent = rest.match(BROADCAST_TARGET_WITH_CONTENT_RE);
+    if (withContent) {
+      return sendBroadcast(userId, BROADCAST_TARGET_ALIASES[withContent[1]], withContent[2]);
+    }
+    // 沒指定對象：維持舊版「群發 訊息內容」的行為，推給隊長
+    return sendBroadcast(userId, "leader", rest);
   }
 
   if ((groupNo = matchGroupNo(text, APPROVE_RE)) != null) {
@@ -318,4 +419,4 @@ async function route(userId, rawText) {
   };
 }
 
-module.exports = { route };
+module.exports = { route, resetPendingBroadcasts };

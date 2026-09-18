@@ -96,7 +96,7 @@
         <button class="btn secondary" id="refresh-broadcasters">🔄 重新整理</button>
       </div>
       <p style="font-size:13px;color:#666;">
-        自助登記為總領隊的帳號（輸入「總領綁定」登記），「群發 訊息內容」實際會送到這裡列出的人，再加上所有小編。
+        自助登記為總領隊的帳號（輸入「總領綁定」登記）。這些人跟所有小編都能用「推播」對隊長、關主、所有人發送訊息。
       </p>
       <table>
         <thead><tr><th>LINE 帳號（末 6 碼）</th><th>登記時間</th></tr></thead>
@@ -192,7 +192,9 @@
         <table style="margin-top:10px;">
           <tbody>
             <tr><td><code>總領綁定</code></td><td>自助登記為總領隊</td></tr>
-            <tr><td><code>群發 訊息內容</code></td><td>對所有目前有隊長的組別廣播一則文字訊息</td></tr>
+            <tr><td><code>推播 隊長 訊息內容</code></td><td>一行打完；對象可換成「關主」「所有人」（所有隊伍成員＋關主），「群發」是同義詞</td></tr>
+            <tr><td><code>推播 隊長</code> → 下一則訊息</td><td>先指定對象，機器人問內容後，下一則訊息就是推播內容；輸入「取消」可放棄</td></tr>
+            <tr><td><code>推播</code> → 對象 → 內容</td><td>依序回覆推播對象與訊息內容；不指定對象直接打「推播 內容」等同推給隊長</td></tr>
           </tbody>
         </table>
       </div>
