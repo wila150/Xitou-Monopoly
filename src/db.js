@@ -64,7 +64,19 @@ CREATE TABLE IF NOT EXISTS teams (
   start_time      TEXT,
   current_index   INTEGER NOT NULL DEFAULT 0,
   finish_time     TEXT,
-  is_late         INTEGER NOT NULL DEFAULT 0
+  is_late         INTEGER NOT NULL DEFAULT 0,
+  bonus_points    INTEGER NOT NULL DEFAULT 0
+);
+
+-- 小編手動加分／扣分的紀錄（任意時機、任意理由，例如額外任務、表現優異、犯規扣分）。
+-- 跟 checkpoint_log 分開存，因為這不是關卡進度，是額外的人工調整，需要留紀錄方便事後對帳。
+CREATE TABLE IF NOT EXISTS bonus_log (
+  id            SERIAL PRIMARY KEY,
+  group_no      INTEGER NOT NULL,
+  points        INTEGER NOT NULL,
+  reason        TEXT,
+  awarded_by    TEXT NOT NULL,
+  awarded_at    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS team_members (
@@ -172,6 +184,11 @@ async function migrateCheckpointImageColumns() {
   }
 }
 
+// 既有正式環境的 teams 表沒有 bonus_points 欄位，CREATE TABLE IF NOT EXISTS 不會補上，要額外 ALTER TABLE。
+async function migrateBonusPointsColumn() {
+  await pool.query(`ALTER TABLE teams ADD COLUMN IF NOT EXISTS bonus_points INTEGER NOT NULL DEFAULT 0`);
+}
+
 async function init() {
   if (!process.env.DATABASE_URL) {
     throw new Error(
@@ -180,6 +197,7 @@ async function init() {
   }
   await pool.query(SCHEMA_SQL);
   await migrateCheckpointImageColumns();
+  await migrateBonusPointsColumn();
 }
 
 module.exports = { db, transaction, init, pool };

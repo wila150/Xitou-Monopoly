@@ -1,16 +1,54 @@
 const teamService = require("../services/teamService");
 const { isAdmin } = require("../config/admins");
 
-const CHECKIN_RE = /^報到\s*(\d{1,2})\s*組$/;
-const DEPART_RE = /^出發\s*(\d{1,2})\s*組$/;
-const ARRIVE_RE = /^到站\s*(\d{1,2})\s*組$/;
-const APPROVE_RE = /^通過\s*(\d{1,2})\s*組$/;
-const REVERT_RE = /^退回\s*(\d{1,2})\s*組$/;
+// 把「一」「十」「二十一」這類中文數字轉成阿拉伯數字，支援 1～99，
+// 讓隊伍可以直接回覆「第一組」「一組」，不用一定要打阿拉伯數字。
+const CHINESE_DIGITS = { 零: 0, 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+function chineseNumeralToInt(text) {
+  if (/^[0-9]+$/.test(text)) return Number(text);
+  if (text === "十") return 10;
+  if (text.includes("十")) {
+    const [tenPart, onePart] = text.split("十");
+    const tens = tenPart ? CHINESE_DIGITS[tenPart] : 1;
+    const ones = onePart ? CHINESE_DIGITS[onePart] : 0;
+    if (tens == null || ones == null) return NaN;
+    return tens * 10 + ones;
+  }
+  return text.length === 1 ? CHINESE_DIGITS[text] : NaN;
+}
+
+// 組別編號可以用阿拉伯數字或中文數字，前面可以加「第」也可以不加——
+// 「1組」「第1組」「一組」「第一組」都算數，所有跟組別有關的指令一致套用這個規則。
+const GROUP_TOKEN = "第?\\s*([0-9]{1,2}|[0-9一二三四五六七八九十]{1,3})\\s*組";
+
+// 動詞跟組別編號誰先誰後都可以：「出發1組」「1組出發」、「通過第1組」「第1組通過」都算數。
+function verbGroupRegex(verb) {
+  return new RegExp(`^(?:${verb}\\s*${GROUP_TOKEN}|${GROUP_TOKEN}\\s*${verb})$`);
+}
+
+// 從 verbGroupRegex／CHECKIN_RE 的比對結果取出組別編號：兩種語序各對應一個捕獲群組，
+// 命中哪一種語序，該群組就有值、另一個是 undefined，所以用 ?? 挑出有值的那個。
+function matchGroupNo(text, re) {
+  const m = text.match(re);
+  if (!m) return null;
+  return chineseNumeralToInt(m[1] ?? m[2]);
+}
+
+// 報到比較特別：「報到」兩個字整個可以省略——點圖文選單「報到」按鈕後，
+// 之後單獨回覆組別（例如「第一組」）、或組別加「報到」（例如「1組報到」）都算報到。
+const CHECKIN_RE = new RegExp(`^(?:報到\\s*${GROUP_TOKEN}|${GROUP_TOKEN}(?:\\s*報到)?)$`);
+const DEPART_RE = verbGroupRegex("出發");
+const ARRIVE_RE = verbGroupRegex("到站");
+const APPROVE_RE = verbGroupRegex("通過");
+const REVERT_RE = verbGroupRegex("退回");
 const REGISTER_REFEREE_RE = /^我是\s*([A-Za-z]\d)\s*關主$/;
 const BROADCAST_RE = /^群發\s+([\s\S]+)$/;
-const TRANSFER_REQUEST_RE = /^接任隊長\s*(\d{1,2})\s*組$/;
-const TRANSFER_CONFIRM_RE = /^確認換隊長\s*(\d{1,2})\s*組$/;
-const UNBIND_RE = /^解除綁定\s*(\d{1,2})\s*組$/;
+const TRANSFER_REQUEST_RE = verbGroupRegex("接任隊長");
+const TRANSFER_CONFIRM_RE = verbGroupRegex("確認換隊長");
+const UNBIND_RE = verbGroupRegex("解除綁定");
+
+// 小編手動加分：「加分 1組 5」「加分 第一組 -3 犯規扣分」，理由可省略。分數只接受阿拉伯數字（可負數）。
+const BONUS_RE = new RegExp(`^加分\\s*${GROUP_TOKEN}\\s*(-?[0-9]+)(?:\\s+([\\s\\S]+))?$`);
 
 function withReply(reply) {
   return { reply, groupBroadcasts: [], directPushes: [] };
@@ -36,13 +74,22 @@ async function route(userId, rawText) {
   const text = rawText.trim();
 
   let m;
+  let groupNo;
 
-  if ((m = text.match(CHECKIN_RE))) {
-    return withReply(await teamService.checkin(Number(m[1]), userId));
+  if (text === "報到") {
+    // 圖文選單「報到」按鈕會送出這個固定文字（組別編號因人而異，選單按鈕沒辦法直接帶號碼）
+    return withReply([
+      teamService.textMsg(
+        "請回覆您的組別編號完成報到，例如「1組」或「第一組」（第一位報到的人會是隊長）。"
+      ),
+    ]);
   }
 
-  if ((m = text.match(DEPART_RE))) {
-    const groupNo = Number(m[1]);
+  if ((groupNo = matchGroupNo(text, CHECKIN_RE)) != null) {
+    return withReply(await teamService.checkin(groupNo, userId));
+  }
+
+  if ((groupNo = matchGroupNo(text, DEPART_RE)) != null) {
     const result = await teamService.depart(groupNo);
     return {
       reply: result.reply,
@@ -51,9 +98,8 @@ async function route(userId, rawText) {
     };
   }
 
-  if ((m = text.match(ARRIVE_RE))) {
+  if ((groupNo = matchGroupNo(text, ARRIVE_RE)) != null) {
     // B6 終點工作人員觸發：隊伍實際抵達 B6，直接辦理終點確認（不需要隊長輸入任何代碼）
-    const groupNo = Number(m[1]);
     const result = await teamService.finishAtB6(groupNo);
     return {
       reply: result.reply,
@@ -82,9 +128,8 @@ async function route(userId, rawText) {
     return { reply: result.reply, groupBroadcasts: [], directPushes: result.directPushes };
   }
 
-  if ((m = text.match(APPROVE_RE))) {
+  if ((groupNo = matchGroupNo(text, APPROVE_RE)) != null) {
     // 小編：對任何關卡都能直接喊過。登記過的關主：只能核准自己登記的那一關。
-    const groupNo = Number(m[1]);
     let restrictToCheckpointId = null;
     if (!isAdmin(userId)) {
       restrictToCheckpointId = await teamService.getRefereeCheckpoint(userId);
@@ -98,10 +143,9 @@ async function route(userId, rawText) {
     };
   }
 
-  if ((m = text.match(REVERT_RE))) {
+  if ((groupNo = matchGroupNo(text, REVERT_RE)) != null) {
     // 小編手滑「通過」/「到站」按錯或按重複時的更正指令：退回一關
     if (!isAdmin(userId)) return adminOnlyDenied();
-    const groupNo = Number(m[1]);
     const result = await teamService.revertLastCheckpoint(groupNo);
     return {
       reply: result.reply,
@@ -139,8 +183,8 @@ async function route(userId, rawText) {
     return { reply, groupBroadcasts, directPushes: [] };
   }
 
-  if ((m = text.match(TRANSFER_REQUEST_RE))) {
-    const result = await teamService.requestLeaderTransfer(Number(m[1]), userId);
+  if ((groupNo = matchGroupNo(text, TRANSFER_REQUEST_RE)) != null) {
+    const result = await teamService.requestLeaderTransfer(groupNo, userId);
     return {
       reply: result.reply,
       groupBroadcasts: [],
@@ -148,14 +192,23 @@ async function route(userId, rawText) {
     };
   }
 
-  if ((m = text.match(TRANSFER_CONFIRM_RE))) {
+  if ((groupNo = matchGroupNo(text, TRANSFER_CONFIRM_RE)) != null) {
     if (!isAdmin(userId)) return adminOnlyDenied();
-    return withReply(await teamService.confirmLeaderTransfer(Number(m[1])));
+    return withReply(await teamService.confirmLeaderTransfer(groupNo));
   }
 
-  if ((m = text.match(UNBIND_RE))) {
+  if ((groupNo = matchGroupNo(text, UNBIND_RE)) != null) {
     if (!isAdmin(userId)) return adminOnlyDenied();
-    return withReply(await teamService.unbindGroup(Number(m[1])));
+    return withReply(await teamService.unbindGroup(groupNo));
+  }
+
+  if ((m = text.match(BONUS_RE))) {
+    // 小編任意時機、任意理由幫某組加分／扣分（例如額外任務、表現優異、犯規扣分），會影響排行榜排序
+    if (!isAdmin(userId)) return adminOnlyDenied();
+    const bonusGroupNo = chineseNumeralToInt(m[1]);
+    const points = Number(m[2]);
+    const reason = m[3] ? m[3].trim() : null;
+    return withReply(await teamService.addBonusPoints(bonusGroupNo, points, reason, userId));
   }
 
   if (text === "重置遊戲 確認" || text === "重置遊戲確認") {
@@ -186,7 +239,7 @@ async function route(userId, rawText) {
     return withReply([
       teamService.textMsg(
         "🌲 森呼吸．永續漫遊｜使用說明\n\n" +
-          "1️⃣ 報到：輸入「報到 X組」（X 是您的組別編號），第一位報到者是隊長\n" +
+          "1️⃣ 報到：輸入您的組別編號，例如「1組」或「第一組」，第一位報到者是隊長\n" +
           "2️⃣ 出發：關主確認隊伍到齊後會公布第一關\n" +
           "3️⃣ 過關：有關主的關卡輸入關主告知的關鍵字；沒有關主的關卡直接上傳照片或影片，等小編確認\n" +
           "4️⃣ 查詢：「目前關卡」看這一關資訊、「闖關進度」看完成幾關與耗時\n" +

@@ -702,6 +702,35 @@ async function unbindGroup(groupNo) {
   });
 }
 
+// ---- 七之二、小編手動加分／扣分（任意時機、任意理由，例如額外任務、表現優異、犯規扣分）----
+// 加分會直接影響排行榜排序（見 buildRanking），視同多完成幾關的效果；點數可以是負數（扣分）。
+
+async function addBonusPoints(groupNo, points, reason, awardedByUserId) {
+  return transaction(async (tx) => {
+    const team = await findTeam(tx, groupNo);
+    if (!team) {
+      return [textMsg(`第 ${groupNo} 組尚未有任何成員報到，無法加分。`)];
+    }
+    await tx.run("UPDATE teams SET bonus_points = bonus_points + ? WHERE group_no = ?", [
+      points,
+      groupNo,
+    ]);
+    await tx.run(
+      `INSERT INTO bonus_log (group_no, points, reason, awarded_by, awarded_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [groupNo, points, reason || null, awardedByUserId, nowIso()]
+    );
+    const updated = await findTeam(tx, groupNo);
+    const verb = points >= 0 ? "加分" : "扣分";
+    const reasonText = reason ? `（理由：${reason}）` : "";
+    return [
+      textMsg(
+        `✅ 已為第 ${groupNo} 組${verb} ${Math.abs(points)} 分${reasonText}，目前累計加分：${updated.bonus_points}`
+      ),
+    ];
+  });
+}
+
 // ---- 八、重置整場遊戲（小編用，非文件原始條款，供活動前彩排／正式開賽前重置）----
 
 async function resetGame() {
@@ -711,6 +740,7 @@ async function resetGame() {
     await tx.run("DELETE FROM team_members");
     await tx.run("DELETE FROM teams");
     await tx.run("DELETE FROM settings");
+    await tx.run("DELETE FROM bonus_log");
     return [textMsg("♻️ 已重置整場遊戲，所有組別的報到、進度與紀錄皆已清空。")];
   });
 }
@@ -773,14 +803,15 @@ async function adminListProgress() {
   const lines = getAllGroupNos().map((groupNo, i) => {
     const team = teams[i];
     if (!team) return `${groupNo}組｜尚未報到`;
-    if (team.status === "CHECKED_IN") return `${groupNo}組｜已報到／待出發`;
+    const bonusText = team.bonus_points ? `｜加分 ${team.bonus_points > 0 ? "+" : ""}${team.bonus_points}` : "";
+    if (team.status === "CHECKED_IN") return `${groupNo}組｜已報到／待出發${bonusText}`;
     if (team.status === "FINISHED") {
       const elapsed = formatElapsed(team.start_time, team.finish_time);
       const tag = team.is_late ? "逾時" : "準時";
-      return `${groupNo}組｜已終點確認（${tag}）｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}`;
+      return `${groupNo}組｜已終點確認（${tag}）｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}${bonusText}`;
     }
     const elapsed = formatElapsed(team.start_time, nowIso());
-    return `${groupNo}組｜闖關中｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}`;
+    return `${groupNo}組｜闖關中｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}${bonusText}`;
   });
   return [textMsg(`📋 目前進度\n${lines.join("\n")}`)];
 }
@@ -800,6 +831,7 @@ async function getProgressSnapshot() {
       currentIndex: team.current_index,
       totalCheckpoints: event.totalCheckpoints,
       startTime: team.start_time,
+      bonusPoints: team.bonus_points || 0,
     };
     if (team.status === "FINISHED") {
       return {
@@ -835,10 +867,14 @@ async function setRankingPublic(isPublic) {
 
 // 對應架構文件 v2「十二、排名規則」：
 // 1. 是否於12:30前完成終點確認（準時 > 逾時或尚未歸隊）
-// 2. 完成關卡數多者排前面
+// 2. 完成關卡數多者排前面（小編手動加分視同多完成幾關，直接併入這一項比較）
 // 3. 總耗時短者排前面；尚未完成終點確認者無總耗時可比，並列於同關卡數的最後
 function bucketOf(team) {
   return team.status === "FINISHED" && !team.is_late ? 0 : 1;
+}
+
+function effectiveProgress(team) {
+  return team.current_index + (team.bonus_points || 0);
 }
 
 async function buildRanking() {
@@ -860,9 +896,8 @@ async function buildRanking() {
   enriched.sort((a, b) => {
     const bucketDiff = bucketOf(a.team) - bucketOf(b.team);
     if (bucketDiff !== 0) return bucketDiff;
-    if (a.team.current_index !== b.team.current_index) {
-      return b.team.current_index - a.team.current_index;
-    }
+    const progressDiff = effectiveProgress(b.team) - effectiveProgress(a.team);
+    if (progressDiff !== 0) return progressDiff;
     if (a.hasFinishTime !== b.hasFinishTime) {
       return a.hasFinishTime ? -1 : 1; // 有總耗時（曾終點確認）者排在同關卡數的前面
     }
@@ -877,16 +912,17 @@ async function formatRanking() {
   const medals = ["🥇", "🥈", "🥉"];
   const lines = ranked.map(({ team }, i) => {
     const rankIcon = medals[i] || `${i + 1}.`;
+    const bonusText = team.bonus_points ? `｜加分 ${team.bonus_points > 0 ? "+" : ""}${team.bonus_points}` : "";
     if (team.status === "CHECKED_IN") {
-      return `${rankIcon} ${team.group_no}組｜尚未出發`;
+      return `${rankIcon} ${team.group_no}組｜尚未出發${bonusText}`;
     }
     if (team.status === "FINISHED") {
       const elapsed = formatElapsed(team.start_time, team.finish_time);
       const tag = team.is_late ? "（逾時）" : "（準時）";
-      return `${rankIcon} ${team.group_no}組｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}${tag}`;
+      return `${rankIcon} ${team.group_no}組｜${team.current_index}/${event.totalCheckpoints}｜${elapsed}${tag}${bonusText}`;
     }
     const elapsed = formatElapsed(team.start_time, nowIso());
-    return `${rankIcon} ${team.group_no}組｜${team.current_index}/${event.totalCheckpoints}｜目前耗時 ${elapsed}（未歸隊）`;
+    return `${rankIcon} ${team.group_no}組｜${team.current_index}/${event.totalCheckpoints}｜目前耗時 ${elapsed}（未歸隊）${bonusText}`;
   });
   return [textMsg(`🏆 排行榜\n${lines.join("\n")}`)];
 }
@@ -912,6 +948,7 @@ module.exports = {
   requestLeaderTransfer,
   confirmLeaderTransfer,
   unbindGroup,
+  addBonusPoints,
   resetGame,
   queryCurrentCheckpoint,
   queryProgress,

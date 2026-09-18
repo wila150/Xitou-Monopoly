@@ -37,7 +37,7 @@ const richMenuRequest = {
     messageArea(0, HEADER_H, COL_W, ROW_H, "目前關卡"),
     messageArea(COL_W, HEADER_H, COL_W, ROW_H, "闖關進度"),
     messageArea(0, HEADER_H + ROW_H, COL_W, ROW_H, "排行榜"),
-    messageArea(COL_W, HEADER_H + ROW_H, COL_W, ROW_H, "使用說明"),
+    messageArea(COL_W, HEADER_H + ROW_H, COL_W, ROW_H, "報到"),
   ],
 };
 

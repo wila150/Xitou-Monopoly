@@ -76,6 +76,24 @@ test("報到：重複報到同組為冪等提示，跨組報到被拒絕", async
   assert.match(textsOf(crossGroup)[0], /先前已綁定為第 1 組/);
 });
 
+test("報到：點圖文選單「報到」按鈕後會提示回覆組別，之後單獨回覆「X組」或中文數字都算報到", async () => {
+  await resetGame();
+  const prompt = await commandRouter.route("Uleader", "報到");
+  assert.match(textsOf(prompt)[0], /請回覆您的組別編號/);
+
+  const bareArabic = await commandRouter.route("Uleader", "1組");
+  assert.match(textsOf(bareArabic)[0], /隊長/);
+  assert.equal((await teamService.findMembership("Uleader")).group_no, 1);
+
+  const chineseWithDi = await commandRouter.route("Umember", "第一組");
+  assert.match(textsOf(chineseWithDi)[0], /組員/);
+  assert.equal((await teamService.findMembership("Umember")).group_no, 1);
+
+  const chineseNoDi = await commandRouter.route("Umember2", "十組");
+  assert.match(textsOf(chineseNoDi)[0], /隊長/);
+  assert.equal((await teamService.findMembership("Umember2")).group_no, 10);
+});
+
 test("出發：未報到組別無法出發，成功後廣播第一關", async () => {
   await resetGame();
   const noTeam = await commandRouter.route(ADMIN, "出發 9組");
@@ -211,6 +229,37 @@ test("通過指令不限關卡類型：小編也可以對關主關卡直接喊�
   assert.equal(team.current_index, keywordIndex + 1);
 });
 
+test("組別編號指令（出發／通過等）都支援「第X組」跟中文數字，不是只有阿拉伯數字", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+
+  const depart = await commandRouter.route(ADMIN, "出發第一組");
+  assert.match(textsOf(depart)[0], /出發/);
+  assert.equal((await teamService.findTeam(1)).status, "IN_PROGRESS");
+
+  const approve = await commandRouter.route(ADMIN, "通過 第1組");
+  assert.match(textsOf(approve)[0], /已為第 1 組確認/);
+  assert.equal((await teamService.findTeam(1)).current_index, 1);
+
+  const approveChinese = await commandRouter.route(ADMIN, "通過一組");
+  assert.match(textsOf(approveChinese)[0], /已為第 1 組確認/);
+  assert.equal((await teamService.findTeam(1)).current_index, 2);
+});
+
+test("組別編號指令：動詞跟組別誰先誰後都可以，「1組出發」跟「出發1組」等價", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "1組報到");
+  assert.equal((await teamService.findTeam(1)).status, "CHECKED_IN");
+
+  const depart = await commandRouter.route(ADMIN, "1組出發");
+  assert.match(textsOf(depart)[0], /出發/);
+  assert.equal((await teamService.findTeam(1)).status, "IN_PROGRESS");
+
+  const approve = await commandRouter.route(ADMIN, "第1組通過");
+  assert.match(textsOf(approve)[0], /已為第 1 組確認/);
+  assert.equal((await teamService.findTeam(1)).current_index, 1);
+});
+
 test("到站：B6工作人員觸發終點確認，完賽指令改為提示訊息", async () => {
   await resetGame();
   await commandRouter.route("Uleader", "報到 1組");
@@ -341,6 +390,36 @@ test("排行榜：預設不公開，開啟後任何人可查詢；準時到站�
   assert.match(text, /排行榜/);
   assert.doesNotMatch(text, /僅開放小編查詢/);
   assert.ok(text.indexOf("1組") < text.indexOf("2組"), "已到站的1組應排在未歸隊的2組前面");
+});
+
+test("加分：小編可以任意時機幫某組加分／扣分，會影響排行榜排序且非小編不能用", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader1", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+  await commandRouter.route("Uleader2", "報到 2組");
+  await commandRouter.route(ADMIN, "出發 2組");
+
+  const denied = await commandRouter.route(STAFF, "加分 1組 5");
+  assert.match(textsOf(denied)[0], /僅限小編使用/);
+
+  // 2組目前跟1組進度一樣（都還沒過任何關），加5分後應該排到1組前面
+  const bonus = await commandRouter.route(ADMIN, "加分 第2組 5 完成指定任務");
+  assert.match(textsOf(bonus)[0], /已為第 2 組加分 5 分（理由：完成指定任務），目前累計加分：5/);
+
+  await commandRouter.route(ADMIN, "排行榜開啟");
+  const ranking = textsOf(await commandRouter.route(ADMIN, "排行榜"))[0];
+  assert.ok(ranking.indexOf("2組") < ranking.indexOf("1組"), "加分後2組應排在1組前面");
+  assert.match(ranking, /加分 \+5/);
+
+  // 扣分：負數也支援，且可以用中文數字＋不加「第」的組別格式
+  const penalty = await commandRouter.route(ADMIN, "加分 二組 -8 犯規扣分");
+  assert.match(textsOf(penalty)[0], /已為第 2 組扣分 8 分（理由：犯規扣分），目前累計加分：-3/);
+});
+
+test("加分：對尚未報到的組別加分會被拒絕", async () => {
+  await resetGame();
+  const result = await commandRouter.route(ADMIN, "加分 5組 10");
+  assert.match(textsOf(result)[0], /尚未有任何成員報到，無法加分/);
 });
 
 test("重置遊戲：需兩步驟確認", async () => {

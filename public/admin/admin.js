@@ -309,6 +309,7 @@ async function loadProgress() {
         IN_PROGRESS: "闖關中",
         FINISHED: "已終點確認",
       }[r.status] || r.status;
+      const bonus = r.bonusPoints || 0;
       return `
         <tr>
           <td>第 ${r.groupNo} 組</td>
@@ -316,6 +317,7 @@ async function loadProgress() {
           <td>${r.currentIndex != null ? `${r.currentIndex}/${r.totalCheckpoints}` : "-"}</td>
           <td>${r.elapsed || "-"}</td>
           <td>${r.isLate === true ? "⚠️ 逾時" : r.isLate === false ? "準時" : "-"}</td>
+          <td>${bonus !== 0 ? (bonus > 0 ? `+${bonus}` : bonus) : "-"}</td>
         </tr>
       `;
     })
