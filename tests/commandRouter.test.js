@@ -1251,3 +1251,44 @@ test("緊急聯絡：各身分的使用說明都列出這個指令，小編說�
   const adminGuide = allTexts((await commandRouter.route(ADMIN, "使用說明")).reply).join("\n");
   assert.match(adminGuide, /處理緊急/);
 });
+
+test("一鍵通過按鈕：隊伍上傳照片時登記在該關的關主也會收到通知＋按鈕；關主「進度」對等待確認的組別附按鈕；按鈕只對登記的那一關有效", async () => {
+  await resetGame();
+  await commandRouter.route("Ub3ref", "我是 B3 關主");
+  await commandRouter.route("Ud5ref", "我是 D5 關主");
+  await commandRouter.route("Ul1", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組"); // 第 1 組第一關是 D5（照片關）
+  assert.equal(getRoute(1)[0].checkpointId, "D5");
+
+  // 隊伍在 D5 上傳：小編＋登記在 D5 的關主都收到通知與按鈕，B3 的關主不會收到
+  const submit = await teamService.submitMedia("Ul1");
+  const byTarget = Object.fromEntries(submit.adminNotify.map((n) => [n.to, n.messages[0]]));
+  assert.ok(byTarget[ADMIN] && byTarget.Ud5ref);
+  assert.equal(byTarget.Ub3ref, undefined, "別關的關主不通知");
+  assert.equal(byTarget.Ud5ref.quickReply.items[0].action.text, "通過 1組");
+  assert.match(byTarget.Ud5ref.text, /在您這關/);
+  assert.doesNotMatch(byTarget.Ud5ref.text, /後台/, "關主看不到後台，不附後台連結");
+  assert.match(byTarget[ADMIN].text, /後台/);
+  assert.match(submit.reply[0].text, /小編或關主/);
+
+  // 同時是小編又登記成關主的人，只會收到一份
+  await teamService.registerReferee(ADMIN, "D5");
+  const dup = await teamService.submitMedia("Ul1");
+  assert.equal(dup.adminNotify.filter((n) => n.to === ADMIN).length, 1);
+
+  // 關主按按鈕（＝送出「通過 1組」）通過 D5；之後第 1 組輪到 B3，B3 關主的「進度」出現按鈕
+  assert.match(textsOf(await commandRouter.route("Ud5ref", byTarget.Ud5ref.quickReply.items[0].action.text))[0], /已為第 1 組確認/);
+  const progress = await commandRouter.route("Ub3ref", "進度");
+  const items = progress.reply[0].quickReply.items;
+  assert.deepEqual(items.map((i) => i.action.text), ["通過 1組"]);
+  assert.equal(items[0].action.label, "✅ 通過 1組");
+  assert.match(textsOf(progress)[0], /現在等您確認：1組/);
+
+  // D5 關主拿同一顆按鈕去通過現在在 B3 的隊伍：不是他登記的關卡，被擋
+  assert.match(textsOf(await commandRouter.route("Ud5ref", "通過 1組"))[0], /不是您登記的關卡/);
+  assert.equal((await teamService.findTeam(1)).current_index, 1);
+
+  // B3 關主點按鈕通過；之後沒有等待確認的組別，「進度」不再附按鈕
+  assert.match(textsOf(await commandRouter.route("Ub3ref", items[0].action.text))[0], /已為第 1 組確認/);
+  assert.equal((await commandRouter.route("Ub3ref", "進度")).reply[0].quickReply, undefined);
+});

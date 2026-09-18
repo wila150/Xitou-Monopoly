@@ -11,6 +11,17 @@ function textMsg(text) {
   return { type: "text", text };
 }
 
+// 訊息底下的「✅ 通過 X組」一鍵按鈕（LINE Quick Reply）：點一下等同輸入「通過 X組」，不用打字。
+// 小編與登記在該關的關主都用這個；權限仍由指令本身把關（關主只能通過自己登記的那一關）。
+function approveQuickReply(groupNos) {
+  return {
+    items: groupNos.slice(0, 13).map((g) => ({
+      type: "action",
+      action: { type: "message", label: `✅ 通過 ${g}組`, text: `通過 ${g}組` },
+    })),
+  };
+}
+
 // 密語／答案比對：自動去除頭尾空白、忽略大小寫；一關可以有多個都算對的答案，
 // 在 keyword 欄位裡用「｜」或「|」分隔（例如「紅檜｜紅檜木」兩個都算對）。
 function normalizeAnswer(text) {
@@ -183,7 +194,7 @@ function refereeHelpMsg(checkpointId = null, guide = false) {
     [
       title,
       "• 進度（或「順序」）：查看這關的預定來訪順序（依路線設定排），每組標上實際進度",
-      "• 通過 X組（例如「通過 1組」）：確認該組完成您這一關，解鎖下一關（只對您登記的這一關生效）",
+      "• 通過 X組（例如「通過 1組」）：確認該組完成您這一關，解鎖下一關（只對您登記的這一關生效）；「進度」底下有等待確認的組別時，會附「✅ 通過 X組」一鍵按鈕",
       "• 出發 X組：現場宣布出發時，開始該組計時並公布第一關",
       ...(checkpointId === "B6" ? ["• 到站 X組：隊伍抵達 B6，辦理終點確認、停止計時（只有登記在 B6 的關主能用）"] : []),
       "• 關主報到（或關主綁定）／我是 XX 關主：想換負責的關卡時重新登記",
@@ -516,27 +527,28 @@ async function submitMedia(userId, media = null) {
         (media ? "" : "（後台預覽失敗）") +
         `，請至官方帳號聊天記錄確認內容。\n` +
         `確認沒問題請輸入「通過 ${team.group_no}組」解鎖下一關。`;
-    // 訊息底下附「一鍵通過」快速回覆按鈕：小編點一下就等同輸入「通過 X組」，不用打字
-    const adminMessages = [
+    // 訊息底下附「一鍵通過」按鈕：小編點一下就等同輸入「通過 X組」，不用打字
+    const adminMessages = [{ ...textMsg(adminText), quickReply: approveQuickReply([team.group_no]) }];
+    const adminIds = getAdminIds();
+    const notify = adminIds.map((adminId) => ({ to: adminId, messages: adminMessages }));
+
+    // 登記在這一關的關主（例如 B6 終點工作人員）也會收到，可以現場確認後直接點按鈕通過（只對自己登記的這一關有效）。
+    // 關主看不到後台預覽，所以訊息寫成「請現場確認」，不附後台連結；同時是小編的人已經收過一份，不重複。
+    const refereeRows = await tx.all("SELECT user_id FROM referees WHERE checkpoint_id = ?", [cp.id]);
+    const refereeMessages = [
       {
-        ...textMsg(adminText),
-        quickReply: {
-          items: [
-            {
-              type: "action",
-              action: {
-                type: "message",
-                label: `✅ 通過 ${team.group_no}組`,
-                text: `通過 ${team.group_no}組`,
-              },
-            },
-          ],
-        },
+        ...textMsg(
+          `📸 第 ${team.group_no} 組在您這關「${cp.name}」上傳了${kind}。\n請現場確認任務完成後，點下方按鈕或輸入「通過 ${team.group_no}組」。`
+        ),
+        quickReply: approveQuickReply([team.group_no]),
       },
     ];
+    for (const { user_id: refereeId } of refereeRows) {
+      if (!adminIds.includes(refereeId)) notify.push({ to: refereeId, messages: refereeMessages });
+    }
     return {
-      reply: [textMsg(`📮 已收到您上傳的${kind}，請等待小編確認後解鎖下一關。`)],
-      adminNotify: getAdminIds().map((adminId) => ({ to: adminId, messages: adminMessages })),
+      reply: [textMsg(`📮 已收到您上傳的${kind}，請等待${refereeRows.length > 0 ? "小編或關主" : "小編"}確認後解鎖下一關。`)],
+      adminNotify: notify,
     };
   });
 }
@@ -1598,10 +1610,13 @@ async function refereeListProgress(checkpointId) {
 
   const out = [`📋 ${cp.id}｜${cp.name}｜預定來訪順序`, "（依路線設定排列，括號是該組的第幾關）", ""];
   if (waitingGroups.length > 0) {
-    out.push(`👉 現在等您確認：${waitingGroups.map((g) => `${g}組`).join("、")}`, "");
+    out.push(`👉 現在等您確認：${waitingGroups.map((g) => `${g}組`).join("、")}（確認完成後點下方按鈕通過）`, "");
   }
   out.push(...lines);
-  return [textMsg(out.join("\n"))];
+  // 只對「已輪到這關、等待確認」的組別附一鍵通過按鈕：關主是看完清單、確認任務完成才點，比推播上的按鈕不容易按錯
+  const message = textMsg(out.join("\n"));
+  if (waitingGroups.length > 0) message.quickReply = approveQuickReply(waitingGroups);
+  return [message];
 }
 
 // 小編也能查某一關的來訪順序（關主是用自己登記的那關），輸入關卡代號或名稱

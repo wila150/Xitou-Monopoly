@@ -88,8 +88,10 @@ async function passCurrentStep(groupNo) {
     mimeType: cp.verifyType === "video" ? "video/mp4" : "image/jpeg",
   });
   assert.match(submit.reply[0].text, /已收到您上傳/);
-  assert.equal(submit.adminNotify.length, 1);
-  assert.equal(submit.adminNotify[0].to, ADMIN);
+  // 收件人＝小編＋登記在這一關的關主：這場景只有 B6 終點工作人員登記在照片關，所以只有 B6 這關多一位收件人
+  assert.equal(submit.adminNotify.filter((n) => n.to === ADMIN).length, 1, "小編只會收到一份");
+  const others = submit.adminNotify.filter((n) => n.to !== ADMIN).map((n) => n.to);
+  assert.deepEqual(others, cp.id === "B6" ? ["Ub6staff"] : [], `${cp.id} 的額外收件人`);
   const result = await commandRouter.route(ADMIN, `通過 ${groupNo}組`);
   assert.match(firstText(result), new RegExp(`已為第 ${groupNo} 組確認`));
   return cp.verifyType;
