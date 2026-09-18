@@ -752,6 +752,39 @@ function findCheckpointByIdOrName(text) {
   );
 }
 
+// 比「代號或名稱完全相同」寬鬆，給「我是節奏關主」「A5 星空之門關主」這類自然說法用：
+// 文字裡帶著關卡代號、或完整關卡名稱、或名稱的一部分（至少 2 字且只對得到一關）都算。
+// 只用在「…關主」結尾的登記說法，不用在單獨回覆（單獨回覆太寬鬆會跟關鍵字撞）。
+function resolveCheckpointLoose(text) {
+  const t = String(text || "").trim().replace(/(?:負責的?)?(?:關卡|這關)$/, "").trim();
+  if (!t) return null;
+  const exact = findCheckpointByIdOrName(t);
+  if (exact) return exact;
+  const all = getAllCheckpoints();
+  const idMatch = t.match(/(?<![A-Za-z])([A-Za-z]\d+)(?!\d)/);
+  if (idMatch) {
+    const byId = all.find((cp) => cp.id.toLowerCase() === idMatch[1].toLowerCase());
+    if (byId) return byId;
+  }
+  const byFullName = all.filter((cp) => t.includes(cp.name));
+  if (byFullName.length === 1) return byFullName[0];
+  if ([...t].length >= 2) {
+    const partial = all.filter((cp) => cp.name.includes(t));
+    if (partial.length === 1) return partial[0];
+  }
+  return null;
+}
+
+// 打了「我是…關主」但對不到關卡（例如把自己的名字放進去）時的引導訊息，列出所有關卡方便照著打
+function unknownRefereeCheckpointMsg(input) {
+  const list = getAllCheckpoints().map((cp) => `${cp.id} ${cp.name}`).join("\n");
+  return [
+    textMsg(
+      `⚠️ 找不到「${input || "（空白）"}」這一關。請輸入您負責的關卡代號，例如「我是 B3 關主」，或直接回關卡名稱（不用放自己的名字）。\n\n關卡代號與名稱：\n${list}`
+    ),
+  ];
+}
+
 // 關主也能像隊伍報到一樣，單獨回覆關卡代號或名稱就完成登記（不用一定要打「我是 XX 關主」）。
 // 只有「目前不是任何隊伍成員」的帳號才會走這條路徑，回傳 null 表示不適用（例如已經是隊伍成員，
 // 這種情況下該讓文字繼續走關鍵字比對流程，不要被誤判成要登記關主）。
@@ -1932,6 +1965,8 @@ module.exports = {
   adminRoleCommand,
   usageGuideFor,
   tryRefereeBareRegistration,
+  resolveCheckpointLoose,
+  unknownRefereeCheckpointMsg,
   getRefereeCheckpoint,
   resetReferees,
   listReferees,

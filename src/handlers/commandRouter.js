@@ -43,6 +43,9 @@ const APPROVE_RE = verbGroupRegex("通過");
 const REVERT_RE = verbGroupRegex("退回");
 const CANCEL_FINISH_RE = verbGroupRegex("取消到站");
 const REGISTER_REFEREE_RE = /^我是\s*([A-Za-z]\d)\s*關主$/;
+// 自然說法也接受：「我是節奏關主」「我是A5 星空之門關主」「瘋狂驗光師關主」（代號、名稱或名稱一部分都行）。
+// 有「我是」開頭卻對不到關卡會回引導；沒有「我是」時對不到就當作不是這個指令（避免誤吃「推播 關主」「重置關主」）
+const LOOSE_REFEREE_RE = /^(我是|我負責|我是負責)?\s*(.*?)\s*的?關主$/;
 // 「關主報到」「關主綁定」「報到 關主」「綁定 關主」都算，說法不用固定；總領隊同理
 const REFEREE_ENTRY_RE = /^(?:關主\s*(?:報到|綁定)|(?:報到|綁定)\s*關主)$/;
 const BROADCASTER_ENTRY_RE = /^(?:總領隊?\s*(?:報到|綁定)|(?:報到|綁定)\s*總領隊?)$/;
@@ -322,6 +325,12 @@ async function route(userId, rawText) {
     // 關主自助登記：「我是 B3 關主」，同一帳號再傳一次會直接覆蓋成新的登記
     const checkpointId = m[1].toUpperCase();
     return withReply(await teamService.registerReferee(userId, checkpointId));
+  }
+
+  if ((m = text.match(LOOSE_REFEREE_RE))) {
+    const cp = teamService.resolveCheckpointLoose(m[2]);
+    if (cp) return withReply(await teamService.registerReferee(userId, cp.id));
+    if (m[1]) return withReply(teamService.unknownRefereeCheckpointMsg(m[2]));
   }
 
   if (BROADCASTER_ENTRY_RE.test(text)) {

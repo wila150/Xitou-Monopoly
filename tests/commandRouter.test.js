@@ -1523,3 +1523,33 @@ test("推播確認步驟：預覽含人數與內容；確認前重新輸入會�
   const oneLine = await commandRouter.route(STAFF, "推播 隊長 一行打完");
   assert.match(textsOf(oneLine)[0], /已推播給 2 位小隊長/);
 });
+
+test("關主登記接受自然說法：名稱、名稱一部分、代號＋名稱、不加「我是」", async () => {
+  await resetGame();
+  const cases = [
+    ["Uloose1", "我是節奏關主", "D6"],
+    ["Uloose2", "我是A5 星空之門關主", "A5"],
+    ["Uloose3", "瘋狂驗光師關主", "C4"],
+    ["Uloose4", "我是 救救菜英文 關主", "B3"],
+    ["Uloose5", "我是B4的關主", "B4"],
+  ];
+  for (const [uid, text, cpId] of cases) {
+    const r = textsOf(await commandRouter.route(uid, text));
+    assert.match(r[0], new RegExp(`已登記為.*（${cpId}）的關主`), `${text} 應登記為 ${cpId}`);
+    assert.equal(await teamService.getRefereeCheckpoint(uid), cpId);
+  }
+});
+
+test("關主登記對不到關卡：有「我是」給引導、沒有就不誤吃其他指令", async () => {
+  await resetGame();
+  const r = textsOf(await commandRouter.route("Uloose6", "我是小柏關主"));
+  assert.match(r[0], /找不到「小柏」/);
+  assert.match(r[0], /D6 節奏遊戲/);
+  assert.equal(await teamService.getRefereeCheckpoint("Uloose6"), null);
+
+  // 「重置關主」「推播 關主」不能被寬鬆規則吃掉
+  const reset = textsOf(await commandRouter.route("Uloose6", "重置關主"));
+  assert.doesNotMatch(reset[0], /找不到/);
+  const cast = textsOf(await commandRouter.route("Uloose6", "推播 關主"));
+  assert.doesNotMatch(cast[0], /找不到|已登記為/);
+});
