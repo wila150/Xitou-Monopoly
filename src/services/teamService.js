@@ -756,7 +756,8 @@ function findCheckpointByIdOrName(text) {
 // 文字裡帶著關卡代號、或完整關卡名稱、或名稱的一部分（至少 2 字且只對得到一關）都算。
 // 只用在「…關主」結尾的登記說法，不用在單獨回覆（單獨回覆太寬鬆會跟關鍵字撞）。
 function resolveCheckpointLoose(text) {
-  const t = String(text || "").trim().replace(/(?:負責的?)?(?:關卡|這關)$/, "").trim();
+  // 全形英數（手機輸入法常見的「Ｄ６」）先轉半形，否則代號比對不到
+  const t = String(text || "").normalize("NFKC").trim().replace(/(?:負責的?)?(?:關卡|這關)$/, "").trim();
   if (!t) return null;
   const exact = findCheckpointByIdOrName(t);
   if (exact) return exact;

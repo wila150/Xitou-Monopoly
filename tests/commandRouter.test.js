@@ -1532,6 +1532,8 @@ test("關主登記接受自然說法：名稱、名稱一部分、代號＋名�
     ["Uloose3", "瘋狂驗光師關主", "C4"],
     ["Uloose4", "我是 救救菜英文 關主", "B3"],
     ["Uloose5", "我是B4的關主", "B4"],
+    ["Uloose7", "我是小柏Ｄ6關主", "D6"], // 名字＋全形代號
+    ["Uloose8", "我是 Ｂ３ 關主", "B3"],
   ];
   for (const [uid, text, cpId] of cases) {
     const r = textsOf(await commandRouter.route(uid, text));
