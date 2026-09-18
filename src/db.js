@@ -54,7 +54,7 @@ async function transaction(fn) {
 // ①②已報到／待出發合併為 CHECKED_IN（文件中兩者間沒有獨立觸發指令，皆是「等待關主宣布出發」）
 // ③闖關中 = IN_PROGRESS　④已在B6辦理終點確認 = FINISHED
 // finish_time／is_late 只會在 B6 工作人員觸發「到站 X組」時才寫入，
-// 12:30 或小編「遊戲結束」只會凍結 current_index（見 settings 的 progress_frozen_at），不會自動產生 finish_time。
+// 小編手動「遊戲結束」只會凍結 current_index（見 settings 的 progress_frozen_at），不會自動產生 finish_time。
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS teams (
   group_no        INTEGER PRIMARY KEY,

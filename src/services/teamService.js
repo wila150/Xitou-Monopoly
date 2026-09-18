@@ -134,7 +134,7 @@ async function getGroupBroadcastRecipientIds(groupNo) {
   return team && team.leader_user_id ? [team.leader_user_id] : [];
 }
 
-// 12:30 或小編「遊戲結束」之後，系統停止受理新的關卡進度（見 freezeProgress）
+// 小編手動輸入「遊戲結束」之後，系統停止受理新的關卡進度（見 freezeProgress）；不會在 12:30 自動觸發
 async function isProgressFrozen(exec) {
   const row = await exec.get(
     "SELECT value FROM settings WHERE key = 'progress_frozen_at'"
@@ -219,7 +219,7 @@ function adminHelpMsg() {
       "• 加分 X組 N 理由：加分或扣分（N 可以是負數）",
       "• 進度：查看所有組別狀態",
       "• 順序 B3：查看某一關的來訪順序（也可打關卡名稱）",
-      "• 遊戲結束：提前停止受理新的關卡進度",
+      "• 遊戲結束：手動停止受理新的關卡進度（一般用不到——逾時的隊伍仍可繼續闖關，成績會標註逾時）",
       "• 排行榜開啟／排行榜關閉：控制排行榜是否公開",
       "• 處理緊急 N：接手處理某則緊急聯絡（收到警報時直接點訊息底下的「我來處理」按鈕即可）",
       "• 推播（隊長／關主／所有人）：小編不用登記就能用",
@@ -906,7 +906,7 @@ async function finishAtB6(groupNo) {
   });
 }
 
-// ---- 五、凍結關卡進度（小編「遊戲結束」／12:30 排程共用；不會產生終點確認）----
+// ---- 五、凍結關卡進度（只有小編手動「遊戲結束」會觸發，沒有排程；不會產生終點確認）----
 
 async function freezeProgress() {
   return transaction(async (tx) => {
@@ -1508,7 +1508,7 @@ async function setRankingPublic(isPublic) {
 }
 
 // 對應架構文件 v2「十二、排名規則」：
-// 1. 是否於12:30前完成終點確認（準時 > 逾時或尚未歸隊）
+// 1. 是否準時完成終點確認（準時 > 逾時或尚未歸隊；準時＝出發後 event.maxDurationMinutes 內，見 timeUtil.isLate）
 // 2. 完成關卡數多者排前面（小編手動加分視同多完成幾關，直接併入這一項比較）
 // 3. 總耗時短者排前面；尚未完成終點確認者無總耗時可比，並列於同關卡數的最後
 function bucketOf(team) {
