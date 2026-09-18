@@ -35,6 +35,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (btn.dataset.tab === "progress") loadProgress();
     if (btn.dataset.tab === "referees") loadReferees();
     if (btn.dataset.tab === "leaders") loadTeamLeaders();
+    if (btn.dataset.tab === "welcome") loadWelcomeMessage();
   });
 });
 
@@ -377,6 +378,22 @@ async function loadTeamLeaders() {
     .join("");
 }
 document.getElementById("refresh-leaders").addEventListener("click", loadTeamLeaders);
+
+// ---- 加好友歡迎詞 ----
+const welcomeMsg = document.getElementById("welcome-msg");
+async function loadWelcomeMessage() {
+  const { message } = await api("/api/welcome-message");
+  document.getElementById("welcome-text").value = message;
+}
+document.getElementById("save-welcome").addEventListener("click", async () => {
+  try {
+    const message = document.getElementById("welcome-text").value;
+    await api("/api/welcome-message", { method: "PUT", body: JSON.stringify({ message }) });
+    showMsg(welcomeMsg, "已儲存歡迎訊息", false);
+  } catch (err) {
+    showMsg(welcomeMsg, err.message, true);
+  }
+});
 
 // ---- 初始載入 ----
 loadCheckpoints().catch((err) => showMsg(cpMsg, err.message, true));

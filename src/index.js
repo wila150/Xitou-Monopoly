@@ -44,24 +44,15 @@ app.post("/webhook", lineClient.webhookMiddleware, async (req, res) => {
 
 // 加好友時的歡迎訊息：LINE 官方帳號後台內建的「加入好友歡迎訊息」功能請關閉（見 README），
 // 統一由這裡的 webhook 發送，才會跟報到指令實際支援的格式（見 commandRouter.js 的 CHECKIN_RE）保持一致。
-const WELCOME_MESSAGE =
-  "感謝您將本帳號設為好友！🌲\n\n" +
-  "【森呼吸．永續漫遊｜溪頭闖關系統】\n\n" +
-  "請小隊長輸入您的組別編號完成報到（例如：1組、第一組）\n" +
-  "完成報到後，請在集合地點等待關主宣布出發。\n\n" +
-  "出發後，跟著系統指示前往每一關：\n" +
-  "📍 有關主的關卡：請關主告知關鍵字後輸入\n" +
-  "📸 沒有關主的關卡：直接拍照／錄影上傳即可過關\n\n" +
-  "⏰ 活動不要求跑完全部關卡，可依時間自行決定何時折返\n" +
-  "🏁 但請注意：一定要實際回到 B6 終點完成確認，系統才會停止計時！\n\n" +
-  "點擊下方選單，可隨時查詢目前關卡、闖關進度、排行榜。";
-
+// 實際文字內容存在資料庫、可在後台網頁編輯（見 configStore.getWelcomeMessage／setWelcomeMessage）。
 async function handleEvent(event) {
   try {
     if (event.type === "follow") {
       console.log(`收到加入好友事件：userId=${event.source && event.source.userId}`);
       if (event.replyToken) {
-        await lineClient.reply(event.replyToken, [teamService.textMsg(WELCOME_MESSAGE)]);
+        await lineClient.reply(event.replyToken, [
+          teamService.textMsg(configStore.getWelcomeMessage()),
+        ]);
         console.log("歡迎訊息已送出");
       }
       return;

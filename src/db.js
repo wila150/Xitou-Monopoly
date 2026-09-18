@@ -157,6 +157,14 @@ CREATE TABLE IF NOT EXISTS team_route_configs (
   PRIMARY KEY (group_no, order_index)
 );
 
+-- 後台網頁可編輯的常駐設定（例如加好友歡迎詞）。跟 settings 表分開，
+-- 是因為 settings 存的是「遊戲進行狀態」（排行榜開關、凍結時間），會被「重置遊戲」整表清空；
+-- 這裡存的是「活動設定」，不該因為重置遊戲而跟著被清掉，行為上比較像 checkpoint_configs。
+CREATE TABLE IF NOT EXISTS app_config (
+  key    TEXT PRIMARY KEY,
+  value  TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_team_members_group ON team_members(group_no);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_log_group ON checkpoint_log(group_no);
 CREATE INDEX IF NOT EXISTS idx_transfer_requests_group ON leader_transfer_requests(group_no, status);

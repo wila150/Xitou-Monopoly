@@ -13,6 +13,21 @@ const imageStore = require("./imageStore");
 
 let checkpointsById = {};
 let routesByGroup = new Map();
+let welcomeMessage = "";
+
+// 加好友時的預設歡迎詞，僅在 app_config 表第一次是空的時候當種子值寫入；
+// 之後小編在後台網頁編輯過，就一律以資料庫內容為準。
+const DEFAULT_WELCOME_MESSAGE =
+  "感謝您將本帳號設為好友！🌲\n\n" +
+  "【森呼吸．永續漫遊｜溪頭闖關系統】\n\n" +
+  "請小隊長輸入您的組別編號完成報到（例如：1組、第一組）\n" +
+  "完成報到後，請在集合地點等待關主宣布出發。\n\n" +
+  "出發後，跟著系統指示前往每一關：\n" +
+  "📍 有關主的關卡：請關主告知關鍵字後輸入\n" +
+  "📸 沒有關主的關卡：直接拍照／錄影上傳即可過關\n\n" +
+  "⏰ 活動不要求跑完全部關卡，可依時間自行決定何時折返\n" +
+  "🏁 但請注意：一定要實際回到 B6 終點完成確認，系統才會停止計時！\n\n" +
+  "點擊下方選單，可隨時查詢目前關卡、闖關進度、排行榜。";
 
 async function seedIfEmpty() {
   const cpCount = await db.get("SELECT COUNT(*)::int AS c FROM checkpoint_configs");
@@ -56,6 +71,13 @@ async function seedIfEmpty() {
       }
     }
   }
+
+  const welcomeRow = await db.get("SELECT value FROM app_config WHERE key = 'welcome_message'");
+  if (!welcomeRow) {
+    await db.run("INSERT INTO app_config (key, value) VALUES ('welcome_message', ?)", [
+      DEFAULT_WELCOME_MESSAGE,
+    ]);
+  }
 }
 
 async function reload() {
@@ -89,10 +111,28 @@ async function reload() {
       .push({ checkpointId: row.checkpoint_id, keyword: row.keyword });
   }
   routesByGroup = newRoutes;
+
+  const welcomeRow = await db.get("SELECT value FROM app_config WHERE key = 'welcome_message'");
+  welcomeMessage = welcomeRow ? welcomeRow.value : DEFAULT_WELCOME_MESSAGE;
 }
 
 async function init() {
   await seedIfEmpty();
+  await reload();
+}
+
+// ---- 加好友歡迎詞 ----
+
+function getWelcomeMessage() {
+  return welcomeMessage;
+}
+
+async function setWelcomeMessage(text) {
+  await db.run(
+    `INSERT INTO app_config (key, value) VALUES ('welcome_message', ?)
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    [text]
+  );
   await reload();
 }
 
@@ -282,4 +322,6 @@ module.exports = {
   deleteCheckpoint,
   setTeamRoute,
   deleteTeamRoute,
+  getWelcomeMessage,
+  setWelcomeMessage,
 };

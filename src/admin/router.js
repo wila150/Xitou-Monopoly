@@ -211,6 +211,25 @@ router.get("/api/team-leaders", async (req, res, next) => {
   }
 });
 
+// ---- 加好友歡迎詞 ----
+
+router.get("/api/welcome-message", (req, res) => {
+  res.json({ message: configStore.getWelcomeMessage() });
+});
+
+router.put("/api/welcome-message", async (req, res, next) => {
+  try {
+    const { message } = req.body || {};
+    if (typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({ error: "歡迎訊息不能是空的" });
+    }
+    await configStore.setWelcomeMessage(message);
+    res.json({ ok: true, message: configStore.getWelcomeMessage() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // 重置整場遊戲：清空所有隊伍報到／進度／紀錄，跟 LINE 指令「重置遊戲 確認」是同一個底層函式。
 // 這是不可逆操作，前端有另外做二次確認，這裡再多要求 body 帶 confirm: true，避免誤觸的請求直接生效。
 router.post("/api/reset-game", async (req, res, next) => {
