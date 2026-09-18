@@ -1035,7 +1035,12 @@ test("推播：先打「推播 隊長」，下一則訊息就是內容；也可�
 
   const ask = await commandRouter.route(STAFF, "推播 隊長");
   assert.match(textsOf(ask)[0], /請輸入要推播給「小隊長」的訊息內容/);
-  const sent = await commandRouter.route(STAFF, "下午三點在大門口集合");
+  // 內容打好先預覽確認（共幾位、內容原文），按「確認送出」才真的發
+  const preview = await commandRouter.route(STAFF, "下午三點在大門口集合");
+  assert.match(textsOf(preview)[0], /即將推播給「小隊長」（共 1 位）/);
+  assert.match(textsOf(preview)[0], /下午三點在大門口集合/);
+  assert.equal(preview.directPushes.length, 0, "確認前不會發出任何推播");
+  const sent = await commandRouter.route(STAFF, "確認送出");
   assert.match(textsOf(sent)[0], /已推播給 1 位小隊長/);
   assert.match(sent.directPushes[0].messages[0].text, /下午三點在大門口集合/);
 
@@ -1044,12 +1049,23 @@ test("推播：先打「推播 隊長」，下一則訊息就是內容；也可�
   assert.match(textsOf(after)[0], /userId/);
 
   const askTarget = await commandRouter.route(STAFF, "推播");
-  assert.match(textsOf(askTarget)[0], /請輸入推播對象：隊長、關主、所有人/);
+  assert.match(textsOf(askTarget)[0], /請選擇推播對象/);
+  // 對象用快速回覆按鈕選：點按鈕等於輸入那個字
+  assert.deepEqual(
+    askTarget.reply[0].quickReply.items.map((i) => i.action.text),
+    ["隊長", "關主", "所有人", "取消"]
+  );
   const badTarget = await commandRouter.route(STAFF, "隊員");
   assert.match(textsOf(badTarget)[0], /看不懂這個對象/);
   const askContent = await commandRouter.route(STAFF, "關主");
   assert.match(textsOf(askContent)[0], /請輸入要推播給「關主」的訊息內容/);
-  const sentToReferee = await commandRouter.route(STAFF, "請到現場集合");
+  assert.deepEqual(askContent.reply[0].quickReply.items.map((i) => i.action.text), ["取消"]);
+  const previewReferee = await commandRouter.route(STAFF, "請到現場集合");
+  assert.deepEqual(
+    previewReferee.reply[0].quickReply.items.map((i) => i.action.text),
+    ["確認送出", "取消"]
+  );
+  const sentToReferee = await commandRouter.route(STAFF, "確認送出");
   assert.match(textsOf(sentToReferee)[0], /已推播給 1 位關主/);
   assert.equal(sentToReferee.directPushes[0].to, "Ureferee");
 });
@@ -1413,7 +1429,7 @@ test("推播：等待對象時又打完整指令不會被吃掉；冒號（全�
   const body = (r) => r.directPushes[0].messages[0].text.replace(/^📢 總領隊訊息\n/, "");
 
   // 重現回報的情境：先單獨打「群發」進入等待對象，再打完整的「群發 ：隊長 測試123」
-  assert.match(sent(await commandRouter.route(ADMIN, "群發")), /請輸入推播對象/);
+  assert.match(sent(await commandRouter.route(ADMIN, "群發")), /請選擇推播對象/);
   const full = await commandRouter.route(ADMIN, "群發 ：隊長 測試123");
   assert.match(sent(full), /已推播給 1 位小隊長/);
   assert.equal(full.directPushes[0].to, "Uleader");
@@ -1431,7 +1447,7 @@ test("推播：等待對象時又打完整指令不會被吃掉；冒號（全�
   assert.match(sent(await commandRouter.route(ADMIN, "推播：關主 請注意天氣")), /已推播給 1 位關主/);
 
   // 只打「群發：」（沒有內容）＝進入等待對象；「群發 隊長：」＝指定對象、等待內容
-  assert.match(sent(await commandRouter.route(ADMIN, "群發：")), /請輸入推播對象/);
+  assert.match(sent(await commandRouter.route(ADMIN, "群發：")), /請選擇推播對象/);
   assert.match(sent(await commandRouter.route(ADMIN, "群發 關主：")), /請輸入要推播給「關主」的訊息內容/);
   assert.match(sent(await commandRouter.route(ADMIN, "取消")), /已取消推播/);
 
@@ -1454,4 +1470,56 @@ test("推播：等待對象時又打完整指令不會被吃掉；冒號（全�
 
   // 沒有權限的人打帶冒號的寫法一樣被擋
   assert.match(sent(await commandRouter.route("Uleader", "群發：隊長 測試")), /僅限小編或登記過的總領隊/);
+});
+
+test("推播確認步驟：預覽含人數與內容；確認前重新輸入會改寫內容；取消不發送；沒有收件人直接提示；確認逾時失效", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader1", "報到 1組");
+  await commandRouter.route("Uleader2", "報到 2組");
+  await commandRouter.route(STAFF, "總領綁定");
+
+  // 選對象 → 打內容 → 預覽（2 位隊長）→ 想改就重打 → 確認送出，送出的是最後一次的內容
+  await commandRouter.route(STAFF, "推播");
+  await commandRouter.route(STAFF, "隊長");
+  const first = await commandRouter.route(STAFF, "九點集合");
+  assert.match(textsOf(first)[0], /共 2 位/);
+  const edited = await commandRouter.route(STAFF, "十點集合");
+  assert.match(textsOf(edited)[0], /十點集合/);
+  assert.doesNotMatch(textsOf(edited)[0], /九點集合/);
+  const sent = await commandRouter.route(STAFF, "確認送出");
+  assert.match(textsOf(sent)[0], /已推播給 2 位小隊長/);
+  assert.equal(sent.directPushes.length, 2);
+  assert.match(sent.directPushes[0].messages[0].text, /十點集合/);
+
+  // 送出後狀態清掉：再打「確認送出」不會重複發送，只是一般文字
+  const again = await commandRouter.route(STAFF, "確認送出");
+  assert.equal(again.directPushes.length, 0);
+
+  // 預覽後取消：不發送
+  await commandRouter.route(STAFF, "推播 隊長");
+  await commandRouter.route(STAFF, "不要發的內容");
+  const cancelled = await commandRouter.route(STAFF, "取消");
+  assert.match(textsOf(cancelled)[0], /已取消推播/);
+  assert.equal((await commandRouter.route(STAFF, "確認送出")).directPushes.length, 0);
+
+  // 沒有收件人（還沒有關主）：不進入確認，直接提示
+  await commandRouter.route(STAFF, "推播 關主");
+  const empty = await commandRouter.route(STAFF, "測試");
+  assert.match(textsOf(empty)[0], /目前沒有可以接收推播的關主/);
+
+  // 確認畫面放太久（超過 3 分鐘）就失效，不會被之後的「確認送出」誤發
+  await commandRouter.route(STAFF, "推播 隊長");
+  await commandRouter.route(STAFF, "過期的內容");
+  const realNow = Date.now;
+  Date.now = () => realNow() + 4 * 60 * 1000;
+  try {
+    const late = await commandRouter.route(STAFF, "確認送出");
+    assert.equal(late.directPushes.length, 0);
+  } finally {
+    Date.now = realNow;
+  }
+
+  // 一行打完的寫法不需要確認（明確打了對象與內容，直接發送）
+  const oneLine = await commandRouter.route(STAFF, "推播 隊長 一行打完");
+  assert.match(textsOf(oneLine)[0], /已推播給 2 位小隊長/);
 });

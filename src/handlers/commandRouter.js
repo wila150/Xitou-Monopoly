@@ -148,21 +148,64 @@ async function sendBroadcast(userId, target, content) {
   return { reply: result.reply, groupBroadcasts: [], directPushes: result.directPushes };
 }
 
-function targetPrompt() {
+// 文字訊息底下附 LINE 快速回覆按鈕：點一下就等於輸入那個字，總領隊在手機上不用打字
+function withButtons(text, buttons) {
   return withReply([
-    teamService.textMsg(
-      "📢 請輸入推播對象：隊長、關主、所有人\n（輸入「取消」可放棄；也可以直接打「推播 隊長 訊息內容」一次完成）"
-    ),
+    {
+      ...teamService.textMsg(text),
+      quickReply: {
+        items: buttons.map(([label, sendText]) => ({
+          type: "action",
+          action: { type: "message", label, text: sendText },
+        })),
+      },
+    },
   ]);
+}
+
+function targetPrompt() {
+  return withButtons(
+    "📢 請選擇推播對象（點下方按鈕）\n也可以直接打「推播 隊長 訊息內容」一次完成。",
+    [
+      ["👑 隊長", "隊長"],
+      ["🚩 關主", "關主"],
+      ["👥 所有人", "所有人"],
+      ["✖ 取消", "取消"],
+    ]
+  );
 }
 
 function contentPrompt(target) {
   const label = teamService.BROADCAST_TARGET_LABELS[target];
-  return withReply([
-    teamService.textMsg(
-      `✍️ 請輸入要推播給「${label}」的訊息內容\n（您的下一則訊息會直接當作推播內容送出；輸入「取消」可放棄）`
-    ),
-  ]);
+  return withButtons(
+    `✍️ 請輸入要推播給「${label}」的訊息內容\n（您的下一則訊息會當作推播內容，送出前會先讓您確認一次）`,
+    [["✖ 取消", "取消"]]
+  );
+}
+
+// 內容打好之後先預覽並確認一次（推播送出就收不回來，也會用掉 LINE 推播額度）
+async function confirmPrompt(userId, target, content) {
+  const label = teamService.BROADCAST_TARGET_LABELS[target];
+  const count = await teamService.countBroadcastRecipients(target);
+  if (count === 0) {
+    pendingBroadcasts.delete(userId);
+    return withReply([
+      teamService.textMsg(`⚠️ 目前沒有可以接收推播的${label}（尚未有人報到或登記），已取消。`),
+    ]);
+  }
+  pendingBroadcasts.set(userId, {
+    stage: "confirm",
+    target,
+    content,
+    expiresAt: Date.now() + PENDING_BROADCAST_TTL_MS,
+  });
+  return withButtons(
+    `📝 即將推播給「${label}」（共 ${count} 位）：\n──────────\n${content}\n──────────\n確認送出嗎？想修改的話，直接重新輸入內容即可。`,
+    [
+      ["✅ 確認送出", "確認送出"],
+      ["✖ 取消", "取消"],
+    ]
+  );
 }
 
 // 使用者處在「推播」兩步驟對話中：下一則文字訊息就是對象或內容，不再走一般指令比對
@@ -194,8 +237,12 @@ async function handlePendingBroadcast(userId, text, pending) {
     });
     return contentPrompt(key);
   }
-  pendingBroadcasts.delete(userId);
-  return sendBroadcast(userId, pending.target, text);
+  if (pending.stage === "confirm" && text === "確認送出") {
+    pendingBroadcasts.delete(userId);
+    return sendBroadcast(userId, pending.target, pending.content);
+  }
+  // 內容階段的下一則訊息就是內容；確認階段打了別的字，視為重新輸入內容
+  return confirmPrompt(userId, pending.target, text);
 }
 
 // 將 teamService 各函式回傳的訊息，統一整理成

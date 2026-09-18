@@ -211,9 +211,9 @@ function broadcasterHelpMsg(guide = false) {
     [
       guide ? "📖 使用說明｜總領隊" : "📖 總領隊可用指令",
       "• 出發 X組：現場宣布出發時，開始該組計時並公布第一關",
-      "• 推播 隊長 訊息內容：一行打完，直接送出（對象可換成「關主」「所有人」）",
-      "• 推播 隊長：先選對象，下一則訊息就是推播內容",
-      "• 推播：依序回覆對象與內容",
+      "• 推播（或群發）：最簡單——點下方按鈕選對象（隊長／關主／所有人）→ 輸入內容 → 看過預覽再點「確認送出」",
+      "• 推播 隊長 訊息內容：一行打完，直接送出、不用確認（對象可換成「關主」「所有人」）",
+      "• 推播 隊長：先指定對象，下一則訊息就是推播內容（同樣會先預覽確認）",
       "• 取消：中途放棄推播",
       "• 我的ID：查詢自己的 userId",
       "• 緊急聯絡：遇到緊急狀況，立刻通知小編處理",
@@ -985,6 +985,11 @@ async function resolveBroadcastRecipients(target) {
 
 // 總領隊／小編的「推播」：依對象（leader／referee／all）對一群人各推一則文字訊息。
 // 推播則數 = 收件人數（LINE 計費以請求次數 x 收件人數計算），「所有人」會比只推隊長多很多，請留意額度。
+// 推播前先告訴總領隊「這會發給幾個人」（確認畫面用）
+async function countBroadcastRecipients(target) {
+  return (await resolveBroadcastRecipients(target)).length;
+}
+
 async function broadcastMessage(target, text) {
   const label = BROADCAST_TARGET_LABELS[target];
   const ids = await resolveBroadcastRecipients(target);
@@ -1858,6 +1863,7 @@ module.exports = {
   resetBroadcasters,
   listBroadcasters,
   broadcastMessage,
+  countBroadcastRecipients,
   BROADCAST_TARGET_LABELS,
   revertLastCheckpoint,
   cancelFinish,
