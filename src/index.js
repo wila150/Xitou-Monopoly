@@ -17,15 +17,6 @@ const app = express();
 
 teamService.setProfileResolver(lineClient.getDisplayName);
 
-// 用檔案開頭幾個 byte 判斷實際圖片格式，比直接假設「LINE 照片一定是 JPEG」保險
-// （相簿選圖也可能是 PNG，例如截圖），存進審核佇列的 Content-Type 才會跟實際內容一致。
-function detectImageMimeType(buffer) {
-  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
-    return "image/png";
-  }
-  return "image/jpeg";
-}
-
 // 關卡圖片：/maps/A2.jpg ...
 // 後台網頁上傳的圖片存在資料庫（見 imageStore.js），先查資料庫，查不到再 fallback
 // 到 public/maps/ 底下隨 git 部署的原始示意圖／現場照片。
@@ -132,11 +123,8 @@ async function handleEvent(event) {
       // 下載失敗（例如太久沒處理、LINE 內容過期）不影響原本的文字通知流程，退回舊行為就好。
       let media = null;
       try {
-        const buffer = await lineClient.getMessageContent(event.message.id);
-        media = {
-          buffer,
-          mimeType: event.message.type === "video" ? "video/mp4" : detectImageMimeType(buffer),
-        };
+        // 影片要等 LINE 轉檔完成才抓得到完整內容；抓到的東西會檢查大小與格式，不合格就丟錯（見 lineContent.js）
+        media = await lineClient.getMessageContent(event.message.id, event.message.type);
       } catch (err) {
         console.error("下載使用者上傳的照片／影片內容失敗：", err);
       }

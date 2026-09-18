@@ -735,7 +735,10 @@ function submissionCardHtml(r) {
       <strong>第 ${r.groupNo} 組｜${r.checkpointName}（${r.checkpointId}）</strong>
       <p style="font-size:12px;color:#888;margin:4px 0 10px;">上傳時間：${new Date(r.submittedAt).toLocaleString("zh-TW")}</p>
       ${mediaEl}
-      <p class="media-error" style="display:none;font-size:12px;color:#c0392b;">預覽載入失敗，<a href="${mediaUrl}" target="_blank" rel="noopener">點這裡在新分頁開啟</a>，或到 LINE 聊天記錄確認。</p>
+      <p class="media-error" style="display:none;font-size:12px;color:#c0392b;">
+        預覽載入失敗。<span class="media-error-reason">正在檢查原因…</span>
+        <a href="${mediaUrl}" download>⬇ 下載檔案</a>｜<a href="${mediaUrl}" target="_blank" rel="noopener">新分頁開啟</a>｜或到 LINE 聊天記錄確認。
+      </p>
       <div class="toolbar" style="margin-top:10px;">
         <button class="btn approve-submission" data-id="${r.id}">✅ 通過</button>
         <button class="btn danger reject-submission" data-id="${r.id}">🗑 移除</button>
@@ -744,11 +747,41 @@ function submissionCardHtml(r) {
   `;
 }
 
+// 預覽載入失敗時，只抓第一個 byte 問伺服器發生什麼事，把原因顯示給小編（不用開開發者工具）
+async function diagnoseMediaFailure(url, isVideo) {
+  try {
+    const res = await fetch(url, { headers: { Range: "bytes=0-0" } });
+    if (res.status === 401) {
+      window.location.href = "/admin/login";
+      return "登入已過期，正在跳轉到登入頁…";
+    }
+    if (res.status === 404 || res.status === 416) {
+      const data = await res.json().catch(() => ({}));
+      return data.error || "檔案是空的或已被處理過，請到 LINE 聊天記錄確認，並請隊伍重傳。";
+    }
+    if (res.ok) {
+      const type = res.headers.get("content-type") || "未知格式";
+      const range = res.headers.get("content-range");
+      const size = range ? Number(range.split("/")[1]) : Number(res.headers.get("content-length"));
+      const sizeText = size ? `${(size / 1024 / 1024).toFixed(1)} MB` : "大小未知";
+      if (type.includes("heic")) return `檔案存在（${type}，${sizeText}）但這是 iPhone 原始照片格式，瀏覽器通常無法顯示，請下載後檢視。`;
+      return `檔案存在（${type}，${sizeText}）但瀏覽器無法播放／顯示${isVideo ? "，可能是 iPhone 的 HEVC 編碼影片，Chrome 需要硬體支援才能播" : ""}，請下載後用播放器開啟，或改用 Safari。`;
+    }
+    return `伺服器回應 HTTP ${res.status}。`;
+  } catch (err) {
+    return "連線失敗，請確認網路後按「重新整理」。";
+  }
+}
+
 function bindSubmissionCards(list) {
   list.querySelectorAll("img, video").forEach((el) => {
     el.addEventListener("error", () => {
       el.style.display = "none";
-      el.closest(".cp-card").querySelector(".media-error").style.display = "block";
+      const card = el.closest(".cp-card");
+      card.querySelector(".media-error").style.display = "block";
+      diagnoseMediaFailure(el.currentSrc || el.src, el.tagName === "VIDEO").then((reason) => {
+        card.querySelector(".media-error-reason").textContent = reason;
+      });
     });
   });
   list.querySelectorAll(".approve-submission").forEach((btn) => {

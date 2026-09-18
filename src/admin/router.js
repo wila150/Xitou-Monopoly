@@ -272,6 +272,10 @@ router.get("/api/submissions/:id/media", async (req, res, next) => {
   try {
     const media = await submissionStore.getSubmissionMedia(Number(req.params.id));
     if (!media) return res.status(404).json({ error: "找不到這筆待審核媒體，可能已經被處理過" });
+    if (media.data.length === 0) {
+      // 舊版在 LINE 還在轉檔時下載影片，可能存進空檔；明確回報，後台預覽失敗時會顯示這個原因
+      return res.status(404).json({ error: "這筆檔案是空的（下載時 LINE 內容還沒準備好），請到 LINE 聊天記錄確認，並請隊伍重傳" });
+    }
     sendWithRange(req, res, media.mime_type, media.data);
   } catch (err) {
     next(err);

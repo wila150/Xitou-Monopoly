@@ -1,4 +1,5 @@
 const line = require("@line/bot-sdk");
+const { downloadContent } = require("./lineContent");
 
 const messagingApiConfig = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
@@ -12,12 +13,10 @@ const client = new line.messagingApi.MessagingApiClient(messagingApiConfig);
 const blobClient = new line.messagingApi.MessagingApiBlobClient(messagingApiConfig);
 const webhookMiddleware = line.middleware(middlewareConfig);
 
-// 下載使用者傳來的照片／影片內容（給審核佇列存進資料庫用），回傳整個 Buffer。
-async function getMessageContent(messageId) {
-  const stream = await blobClient.getMessageContent(messageId);
-  const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  return Buffer.concat(chunks);
+// 下載使用者傳來的照片／影片內容（給審核佇列存進資料庫用），回傳 { buffer, mimeType }。
+// 影片會先等 LINE 轉檔完成、下載後檢查完整性與格式，細節見 lineContent.js。
+function getMessageContent(messageId, kind) {
+  return downloadContent(blobClient, messageId, kind);
 }
 
 // 查使用者的 LINE 顯示名稱（緊急聯絡通知小編時附上，比一串 userId 好認）

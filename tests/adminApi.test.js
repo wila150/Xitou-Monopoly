@@ -403,3 +403,33 @@ test("後台指定／移除總領隊：指定後可以用「推播」與「出�
   assert.equal((await api("/broadcasters/Uboss", { method: "DELETE" })).status, 400);
   assert.ok((await api("/broadcasters")).data.every((b) => b.userId !== "Uboss"));
 });
+
+test("審核佇列：空檔不會存進去；舊版留下的空檔，預覽網址回 404 並說明原因", async () => {
+  await resetGame();
+  const submissionStore = require("../src/config/submissionStore");
+  const saved = await submissionStore.saveSubmission({
+    groupNo: 1, checkpointId: "E3", mediaType: "video", mimeType: "video/mp4", buffer: Buffer.alloc(0), submittedBy: "Ux",
+  });
+  assert.equal(saved, false, "空的內容不存");
+
+  // 舊版可能已經存進空檔：直接寫一筆模擬
+  const row = await dbModule.db.get(
+    `INSERT INTO pending_submissions (group_no, checkpoint_id, media_type, mime_type, data, submitted_by, submitted_at)
+     VALUES (1, 'E3', 'video', 'video/mp4', ?, 'Ux', ?) RETURNING id`,
+    [Buffer.alloc(0), new Date().toISOString()]
+  );
+  const res = await fetch(`${base}/api/submissions/${row.id}/media`, { headers: { Cookie: cookie } });
+  assert.equal(res.status, 404);
+  assert.match((await res.json()).error, /檔案是空的/);
+
+  // 正常的檔案照常回傳，且支援 Range（Safari 影片播放需要）
+  const good = await submissionStore.saveSubmission({
+    groupNo: 2, checkpointId: "E3", mediaType: "video", mimeType: "video/mp4", buffer: Buffer.from("0123456789"), submittedBy: "Ux",
+  });
+  assert.equal(good, true);
+  const goodRow = (await api("/submissions")).data.find((r) => r.groupNo === 2);
+  const ranged = await fetch(`${base}/api/submissions/${goodRow.id}/media`, { headers: { Cookie: cookie, Range: "bytes=2-5" } });
+  assert.equal(ranged.status, 206);
+  assert.equal(ranged.headers.get("content-range"), "bytes 2-5/10");
+  assert.equal(await ranged.text(), "2345");
+});

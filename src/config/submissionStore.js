@@ -5,7 +5,7 @@ const { db } = require("../db");
 const MAX_STORED_BYTES = 15 * 1024 * 1024; // 15MB
 
 async function saveSubmission({ groupNo, checkpointId, mediaType, mimeType, buffer, submittedBy }) {
-  if (!buffer || buffer.length > MAX_STORED_BYTES) return false;
+  if (!buffer || buffer.length === 0 || buffer.length > MAX_STORED_BYTES) return false;
   await db.run(
     `INSERT INTO pending_submissions (group_no, checkpoint_id, media_type, mime_type, data, submitted_by, submitted_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
