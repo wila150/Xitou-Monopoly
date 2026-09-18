@@ -26,20 +26,23 @@ function showMsg(el, text, isErr) {
 }
 
 // ---- 分頁切換 ----
+function switchTab(tab) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+  if (!btn) return;
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById(`panel-${tab}`).classList.add("active");
+  if (tab === "progress") { loadProgress(); loadBroadcastScope(); }
+  if (tab === "referees") loadReferees();
+  if (tab === "leaders") loadTeamLeaders();
+  if (tab === "broadcasters") loadBroadcasters();
+  if (tab === "submissions") loadSubmissions();
+  if (tab === "bonus-log") loadBonusLog();
+  if (tab === "welcome") loadWelcomeMessage();
+}
 document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById(`panel-${btn.dataset.tab}`).classList.add("active");
-    if (btn.dataset.tab === "progress") { loadProgress(); loadBroadcastScope(); }
-    if (btn.dataset.tab === "referees") loadReferees();
-    if (btn.dataset.tab === "leaders") loadTeamLeaders();
-    if (btn.dataset.tab === "broadcasters") loadBroadcasters();
-    if (btn.dataset.tab === "submissions") loadSubmissions();
-    if (btn.dataset.tab === "bonus-log") loadBonusLog();
-    if (btn.dataset.tab === "welcome") loadWelcomeMessage();
-  });
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
 document.getElementById("logout").addEventListener("click", async () => {
@@ -411,43 +414,59 @@ document.getElementById("refresh-broadcasters").addEventListener("click", loadBr
 
 // ---- 照片／影片審核佇列 ----
 const submissionsMsg = document.getElementById("submissions-msg");
+const BASE_TITLE = document.title;
+let approvingIds = new Set();
 
-async function loadSubmissions() {
-  const rows = await api("/api/submissions");
-  const list = document.getElementById("submissions-list");
-  if (rows.length === 0) {
-    list.innerHTML = `<p style="color:#888;font-size:13px;">目前沒有待審核的照片／影片。</p>`;
-    return;
-  }
-  list.innerHTML = rows
-    .map((r) => {
-      const mediaUrl = `/admin/api/submissions/${r.id}/media`;
-      const mediaEl =
-        r.mediaType === "video"
-          ? `<video src="${mediaUrl}" controls style="max-width:100%;max-height:320px;border-radius:6px;"></video>`
-          : `<img src="${mediaUrl}" style="max-width:100%;max-height:320px;border-radius:6px;" />`;
-      return `
-        <div class="cp-card" data-id="${r.id}">
-          <strong>第 ${r.groupNo} 組｜${r.checkpointName}（${r.checkpointId}）</strong>
-          <p style="font-size:12px;color:#888;margin:4px 0 10px;">上傳時間：${new Date(r.submittedAt).toLocaleString("zh-TW")}</p>
-          ${mediaEl}
-          <div class="toolbar" style="margin-top:10px;">
-            <button class="btn approve-submission" data-id="${r.id}">✅ 通過</button>
-            <button class="btn danger reject-submission" data-id="${r.id}">🗑 移除</button>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
+// 分頁標籤與瀏覽器標題顯示待審核數量，小編不用一直切到這個分頁才知道有新的
+function updatePendingBadge(count) {
+  const tab = document.querySelector('.tab-btn[data-tab="submissions"]');
+  tab.textContent = count > 0 ? `照片／影片審核 (${count})` : "照片／影片審核";
+  document.title = count > 0 ? `(${count}) ${BASE_TITLE}` : BASE_TITLE;
+}
 
+function submissionCardHtml(r) {
+  const mediaUrl = `/admin/api/submissions/${r.id}/media`;
+  const mediaEl =
+    r.mediaType === "video"
+      ? `<video src="${mediaUrl}" controls preload="metadata" playsinline style="max-width:100%;max-height:360px;border-radius:6px;"></video>`
+      : `<a href="${mediaUrl}" target="_blank" rel="noopener"><img src="${mediaUrl}" alt="第 ${r.groupNo} 組上傳的照片" style="max-width:100%;max-height:360px;border-radius:6px;" /></a>`;
+  return `
+    <div class="cp-card" data-id="${r.id}">
+      <strong>第 ${r.groupNo} 組｜${r.checkpointName}（${r.checkpointId}）</strong>
+      <p style="font-size:12px;color:#888;margin:4px 0 10px;">上傳時間：${new Date(r.submittedAt).toLocaleString("zh-TW")}</p>
+      ${mediaEl}
+      <p class="media-error" style="display:none;font-size:12px;color:#c0392b;">預覽載入失敗，<a href="${mediaUrl}" target="_blank" rel="noopener">點這裡在新分頁開啟</a>，或到 LINE 聊天記錄確認。</p>
+      <div class="toolbar" style="margin-top:10px;">
+        <button class="btn approve-submission" data-id="${r.id}">✅ 通過</button>
+        <button class="btn danger reject-submission" data-id="${r.id}">🗑 移除</button>
+      </div>
+    </div>
+  `;
+}
+
+function bindSubmissionCards(list) {
+  list.querySelectorAll("img, video").forEach((el) => {
+    el.addEventListener("error", () => {
+      el.style.display = "none";
+      el.closest(".cp-card").querySelector(".media-error").style.display = "block";
+    });
+  });
   list.querySelectorAll(".approve-submission").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      if (approvingIds.has(id)) return;
+      approvingIds.add(id);
+      btn.disabled = true;
       try {
-        await api(`/api/submissions/${btn.dataset.id}/approve`, { method: "POST" });
+        await api(`/api/submissions/${id}/approve`, { method: "POST" });
         showMsg(submissionsMsg, "已通過，訊息已推播給隊伍。", false);
+        // 該組所有待審核紀錄都已清空，重新載入一次以移除同組其他卡片
         await loadSubmissions();
       } catch (err) {
+        btn.disabled = false;
         showMsg(submissionsMsg, err.message, true);
+      } finally {
+        approvingIds.delete(id);
       }
     });
   });
@@ -464,7 +483,36 @@ async function loadSubmissions() {
     });
   });
 }
-document.getElementById("refresh-submissions").addEventListener("click", loadSubmissions);
+
+let lastSubmissionIds = "";
+async function loadSubmissions({ silent = false } = {}) {
+  const rows = await api("/api/submissions");
+  updatePendingBadge(rows.length);
+  const ids = rows.map((r) => r.id).join(",");
+  // 自動更新時內容沒變就不重畫，避免影片播放到一半被打斷
+  if (silent && ids === lastSubmissionIds) return;
+  lastSubmissionIds = ids;
+  const list = document.getElementById("submissions-list");
+  if (rows.length === 0) {
+    list.innerHTML = `<p style="color:#888;font-size:13px;">目前沒有待審核的照片／影片。</p>`;
+    return;
+  }
+  list.innerHTML = rows.map(submissionCardHtml).join("");
+  bindSubmissionCards(list);
+}
+document.getElementById("refresh-submissions").addEventListener("click", () => loadSubmissions());
+
+// 停在審核分頁時每 8 秒自動更新；不在這個分頁時每 20 秒只更新數量徽章
+setInterval(() => {
+  if (document.hidden) return;
+  const onSubmissionsTab = document.getElementById("panel-submissions").classList.contains("active");
+  if (onSubmissionsTab) loadSubmissions({ silent: true }).catch(() => {});
+}, 8000);
+setInterval(() => {
+  if (document.hidden) return;
+  if (document.getElementById("panel-submissions").classList.contains("active")) return;
+  api("/api/submissions").then((rows) => updatePendingBadge(rows.length)).catch(() => {});
+}, 20000);
 
 // ---- 加分紀錄 ----
 async function loadBonusLog() {
@@ -505,3 +553,10 @@ document.getElementById("save-welcome").addEventListener("click", async () => {
 // ---- 初始載入 ----
 loadCheckpoints().catch((err) => showMsg(cpMsg, err.message, true));
 loadRoutes().catch((err) => showMsg(routeMsg, err.message, true));
+
+// LINE 通知附的連結是 /admin#submissions，直接打開審核分頁；一般進來也先載入一次待審核數量徽章
+if (location.hash === "#submissions") {
+  switchTab("submissions");
+} else {
+  api("/api/submissions").then((rows) => updatePendingBadge(rows.length)).catch(() => {});
+}

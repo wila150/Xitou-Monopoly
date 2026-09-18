@@ -239,12 +239,40 @@ router.get("/api/submissions", async (req, res, next) => {
   }
 });
 
+// 影片需要支援 Range 分段讀取，Safari／iPhone 沒有這個就無法播放（Chrome 沒有也能播，所以容易漏掉）
+function sendWithRange(req, res, mimeType, data) {
+  const total = data.length;
+  res.set("Content-Type", mimeType);
+  res.set("Accept-Ranges", "bytes");
+  const header = req.headers.range;
+  if (!header) return res.send(data);
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header);
+  let start;
+  let end;
+  if (m && (m[1] !== "" || m[2] !== "")) {
+    if (m[1] === "") {
+      start = Math.max(total - Number(m[2]), 0);
+      end = total - 1;
+    } else {
+      start = Number(m[1]);
+      end = m[2] === "" ? total - 1 : Math.min(Number(m[2]), total - 1);
+    }
+  }
+  if (start === undefined || start > end || start >= total) {
+    res.set("Content-Range", `bytes */${total}`);
+    return res.status(416).end();
+  }
+  res.status(206);
+  res.set("Content-Range", `bytes ${start}-${end}/${total}`);
+  res.set("Content-Length", String(end - start + 1));
+  return res.end(data.subarray(start, end + 1));
+}
+
 router.get("/api/submissions/:id/media", async (req, res, next) => {
   try {
     const media = await submissionStore.getSubmissionMedia(Number(req.params.id));
     if (!media) return res.status(404).json({ error: "找不到這筆待審核媒體，可能已經被處理過" });
-    res.set("Content-Type", media.mime_type);
-    res.send(media.data);
+    sendWithRange(req, res, media.mime_type, media.data);
   } catch (err) {
     next(err);
   }

@@ -150,6 +150,22 @@ test("登記／報到成功後，會主動附上該身分自己可用的指令�
   }
 });
 
+test("登記入口說法很彈性：關主報到／關主綁定／報到 關主，總領綁定／總領報到／總領隊綁定都可以", async () => {
+  await resetGame();
+  for (const phrase of ["關主報到", "關主綁定", "報到 關主", "報到關主", "綁定 關主"]) {
+    const r = await commandRouter.route(STAFF, phrase);
+    assert.match(textsOf(r)[0], /請回覆您負責的關卡代號或名稱完成登記/, phrase);
+  }
+  for (const [i, phrase] of ["總領綁定", "總領報到", "總領隊綁定", "報到 總領", "綁定總領隊"].entries()) {
+    await teamService.resetBroadcasters();
+    const r = await commandRouter.route(`Ubc${i}`, phrase);
+    assert.match(textsOf(r)[0], /已登記為總領隊/, phrase);
+  }
+  // 一般的「報到」還是隊伍報到，不受影響
+  const team = await commandRouter.route("Uplain", "報到");
+  assert.match(textsOf(team)[0], /請回覆您的組別編號/);
+});
+
 test("出發：未報到組別無法出發，成功後廣播第一關", async () => {
   await resetGame();
   const noTeam = await commandRouter.route(ADMIN, "出發 9組");
@@ -311,6 +327,11 @@ test("照片／影片審核佇列：後台網頁可以看到待審核媒體，�
     mimeType: "image/jpeg",
   });
   assert.match(submit.adminNotify[0].messages[0].text, /照片／影片審核」分頁直接預覽/);
+  // 通知底下附「一鍵通過」快速回覆按鈕，小編點一下就等同輸入「通過 1組」
+  const quick = submit.adminNotify[0].messages[0].quickReply.items[0].action;
+  assert.equal(quick.type, "message");
+  assert.equal(quick.text, "通過 1組");
+  assert.match(submit.adminNotify[0].messages[0].text, /example\.com\/admin#submissions/);
 
   const pending = await teamService.listPendingSubmissions();
   assert.equal(pending.length, 1);

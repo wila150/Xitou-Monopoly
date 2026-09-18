@@ -42,6 +42,9 @@ const ARRIVE_RE = verbGroupRegex("到站");
 const APPROVE_RE = verbGroupRegex("通過");
 const REVERT_RE = verbGroupRegex("退回");
 const REGISTER_REFEREE_RE = /^我是\s*([A-Za-z]\d)\s*關主$/;
+// 「關主報到」「關主綁定」「報到 關主」「綁定 關主」都算，說法不用固定；總領隊同理
+const REFEREE_ENTRY_RE = /^(?:關主\s*(?:報到|綁定)|(?:報到|綁定)\s*關主)$/;
+const BROADCASTER_ENTRY_RE = /^(?:總領隊?\s*(?:報到|綁定)|(?:報到|綁定)\s*總領隊?)$/;
 // 推播（總領隊／小編）：「推播」「推播 隊長」「推播 隊長 訊息內容」，「群發」是同義詞；
 // 對象可以省略（省略就是推給隊長，等同舊版「群發 訊息內容」），也可以分兩步：先指定對象，下一則訊息才是內容。
 const BROADCAST_RE = /^(?:推播|群發)(?:\s+([\s\S]+))?$/;
@@ -171,7 +174,7 @@ async function route(userId, rawText) {
     ]);
   }
 
-  if (text === "關主報到" || text === "報到 關主" || text === "報到關主") {
+  if (REFEREE_ENTRY_RE.test(text)) {
     // 關主專用入口：跟隊伍「報到」對應，提示之後單獨回覆關卡代號或名稱即可完成登記
     return withReply([
       teamService.textMsg(
@@ -209,7 +212,7 @@ async function route(userId, rawText) {
     return withReply(await teamService.registerReferee(userId, checkpointId));
   }
 
-  if (text === "總領綁定") {
+  if (BROADCASTER_ENTRY_RE.test(text)) {
     // 總領隊自助登記：不需要是 ADMIN_USER_IDS，登記後可以用「推播」對隊長／關主／所有人發訊息
     return withReply(await teamService.registerBroadcaster(userId));
   }

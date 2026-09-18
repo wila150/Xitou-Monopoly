@@ -174,7 +174,7 @@ function refereeHelpMsg() {
       "📖 關主可用指令",
       "• 進度：查看有哪些隊伍已出發正往您這關來、或已抵達等待確認",
       "• 通過 X組（例如「通過 1組」）：確認該組完成您這一關，解鎖下一關（只對您登記的這一關生效）",
-      "• 關主報到／我是 XX 關主：想換負責的關卡時重新登記",
+      "• 關主報到（或關主綁定）／我是 XX 關主：想換負責的關卡時重新登記",
       "• 我的ID：查詢自己的 userId",
       "",
       "🔔 有隊伍出發或過關、正往您這關前進時，系統會自動通知您。",
@@ -434,14 +434,32 @@ async function submitMedia(userId, media = null) {
         submittedBy: userId,
       });
     }
+    const base = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+    const adminText = stored
+      ? `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}，可至後台網頁「照片／影片審核」分頁直接預覽。\n` +
+        `確認沒問題請輸入「通過 ${team.group_no}組」，或直接在後台按「✅ 通過」解鎖下一關。` +
+        (base ? `\n👉 ${base}/admin#submissions` : "")
+      : `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}` +
+        (media ? "" : "（後台預覽失敗）") +
+        `，請至官方帳號聊天記錄確認內容。\n` +
+        `確認沒問題請輸入「通過 ${team.group_no}組」解鎖下一關。`;
+    // 訊息底下附「一鍵通過」快速回覆按鈕：小編點一下就等同輸入「通過 X組」，不用打字
     const adminMessages = [
-      textMsg(
-        stored
-          ? `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}，可至後台網頁「照片／影片審核」分頁直接預覽。\n` +
-              `確認沒問題請輸入「通過 ${team.group_no}組」，或直接在後台按「✅ 通過」解鎖下一關。`
-          : `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}，請至官方帳號聊天記錄確認內容。\n` +
-              `確認沒問題請輸入「通過 ${team.group_no}組」解鎖下一關。`
-      ),
+      {
+        ...textMsg(adminText),
+        quickReply: {
+          items: [
+            {
+              type: "action",
+              action: {
+                type: "message",
+                label: `✅ 通過 ${team.group_no}組`,
+                text: `通過 ${team.group_no}組`,
+              },
+            },
+          ],
+        },
+      },
     ];
     return {
       reply: [textMsg(`📮 已收到您上傳的${kind}，請等待小編確認後解鎖下一關。`)],
