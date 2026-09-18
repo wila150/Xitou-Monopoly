@@ -35,6 +35,9 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (btn.dataset.tab === "progress") { loadProgress(); loadBroadcastScope(); }
     if (btn.dataset.tab === "referees") loadReferees();
     if (btn.dataset.tab === "leaders") loadTeamLeaders();
+    if (btn.dataset.tab === "broadcasters") loadBroadcasters();
+    if (btn.dataset.tab === "submissions") loadSubmissions();
+    if (btn.dataset.tab === "bonus-log") loadBonusLog();
     if (btn.dataset.tab === "welcome") loadWelcomeMessage();
   });
 });
@@ -394,6 +397,94 @@ async function loadTeamLeaders() {
     .join("");
 }
 document.getElementById("refresh-leaders").addEventListener("click", loadTeamLeaders);
+
+// ---- 總領隊名單 ----
+async function loadBroadcasters() {
+  const rows = await api("/api/broadcasters");
+  document.getElementById("broadcasters-body").innerHTML = rows
+    .map(
+      (r) => `<tr><td>...${r.userIdSuffix}</td><td>${new Date(r.registeredAt).toLocaleString("zh-TW")}</td></tr>`
+    )
+    .join("") || `<tr><td colspan="2" style="color:#888;">目前沒有人登記為總領隊</td></tr>`;
+}
+document.getElementById("refresh-broadcasters").addEventListener("click", loadBroadcasters);
+
+// ---- 照片／影片審核佇列 ----
+const submissionsMsg = document.getElementById("submissions-msg");
+
+async function loadSubmissions() {
+  const rows = await api("/api/submissions");
+  const list = document.getElementById("submissions-list");
+  if (rows.length === 0) {
+    list.innerHTML = `<p style="color:#888;font-size:13px;">目前沒有待審核的照片／影片。</p>`;
+    return;
+  }
+  list.innerHTML = rows
+    .map((r) => {
+      const mediaUrl = `/admin/api/submissions/${r.id}/media`;
+      const mediaEl =
+        r.mediaType === "video"
+          ? `<video src="${mediaUrl}" controls style="max-width:100%;max-height:320px;border-radius:6px;"></video>`
+          : `<img src="${mediaUrl}" style="max-width:100%;max-height:320px;border-radius:6px;" />`;
+      return `
+        <div class="cp-card" data-id="${r.id}">
+          <strong>第 ${r.groupNo} 組｜${r.checkpointName}（${r.checkpointId}）</strong>
+          <p style="font-size:12px;color:#888;margin:4px 0 10px;">上傳時間：${new Date(r.submittedAt).toLocaleString("zh-TW")}</p>
+          ${mediaEl}
+          <div class="toolbar" style="margin-top:10px;">
+            <button class="btn approve-submission" data-id="${r.id}">✅ 通過</button>
+            <button class="btn danger reject-submission" data-id="${r.id}">🗑 移除</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  list.querySelectorAll(".approve-submission").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await api(`/api/submissions/${btn.dataset.id}/approve`, { method: "POST" });
+        showMsg(submissionsMsg, "已通過，訊息已推播給隊伍。", false);
+        await loadSubmissions();
+      } catch (err) {
+        showMsg(submissionsMsg, err.message, true);
+      }
+    });
+  });
+  list.querySelectorAll(".reject-submission").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("只會移除這筆待審核紀錄，不會讓隊伍過關，確定嗎？")) return;
+      try {
+        await api(`/api/submissions/${btn.dataset.id}`, { method: "DELETE" });
+        showMsg(submissionsMsg, "已移除。", false);
+        await loadSubmissions();
+      } catch (err) {
+        showMsg(submissionsMsg, err.message, true);
+      }
+    });
+  });
+}
+document.getElementById("refresh-submissions").addEventListener("click", loadSubmissions);
+
+// ---- 加分紀錄 ----
+async function loadBonusLog() {
+  const rows = await api("/api/bonus-log");
+  document.getElementById("bonus-log-body").innerHTML = rows
+    .map((r) => {
+      const pointsText = r.points > 0 ? `+${r.points}` : `${r.points}`;
+      return `
+        <tr>
+          <td>第 ${r.groupNo} 組</td>
+          <td>${pointsText}</td>
+          <td>${r.reason || "-"}</td>
+          <td>...${r.awardedBySuffix}</td>
+          <td>${new Date(r.awardedAt).toLocaleString("zh-TW")}</td>
+        </tr>
+      `;
+    })
+    .join("") || `<tr><td colspan="5" style="color:#888;">目前沒有任何加分紀錄</td></tr>`;
+}
+document.getElementById("refresh-bonus-log").addEventListener("click", loadBonusLog);
 
 // ---- 加好友歡迎詞 ----
 const welcomeMsg = document.getElementById("welcome-msg");

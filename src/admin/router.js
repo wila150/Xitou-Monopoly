@@ -7,7 +7,9 @@ const multer = require("multer");
 const auth = require("./auth");
 const configStore = require("../config/configStore");
 const imageStore = require("../config/imageStore");
+const submissionStore = require("../config/submissionStore");
 const teamService = require("../services/teamService");
+const lineClient = require("../lineClient");
 
 const router = express.Router();
 const PUBLIC_ADMIN_DIR = path.join(__dirname, "..", "..", "public", "admin");
@@ -206,6 +208,70 @@ router.get("/api/referees", async (req, res, next) => {
 router.get("/api/team-leaders", async (req, res, next) => {
   try {
     res.json(await teamService.listTeamLeaders());
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/api/broadcasters", async (req, res, next) => {
+  try {
+    res.json(await teamService.listBroadcasters());
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/api/bonus-log", async (req, res, next) => {
+  try {
+    res.json(await teamService.listBonusLog());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---- 照片／影片審核佇列 ----
+
+router.get("/api/submissions", async (req, res, next) => {
+  try {
+    res.json(await teamService.listPendingSubmissions());
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/api/submissions/:id/media", async (req, res, next) => {
+  try {
+    const media = await submissionStore.getSubmissionMedia(Number(req.params.id));
+    if (!media) return res.status(404).json({ error: "找不到這筆待審核媒體，可能已經被處理過" });
+    res.set("Content-Type", media.mime_type);
+    res.send(media.data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 通過：跟輸入 LINE 指令「通過 X組」效果完全一樣（小編權限、不限關卡），
+// 會直接推播下一關公告給隊伍（依「即時進度」分頁設定的推播範圍：只推隊長或全組成員）。
+router.post("/api/submissions/:id/approve", async (req, res, next) => {
+  try {
+    const result = await teamService.approveSubmissionById(Number(req.params.id));
+    if (result.groupBroadcast) {
+      const recipientIds = await teamService.getGroupBroadcastRecipientIds(
+        result.groupBroadcast.groupNo
+      );
+      await lineClient.pushToMany(recipientIds, result.groupBroadcast.messages);
+    }
+    res.json({ ok: true, message: (result.reply || []).map((m) => m.text).join("\n") });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 移除：只清掉這筆待審核紀錄，不會讓隊伍過關（例如上傳錯誤、想請隊伍重傳一次）
+router.delete("/api/submissions/:id", async (req, res, next) => {
+  try {
+    await submissionStore.deleteSubmission(Number(req.params.id));
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

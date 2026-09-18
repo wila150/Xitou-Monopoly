@@ -3,6 +3,7 @@ const { getCheckpoint } = require("../config/checkpoints");
 const { getRoute, getAllGroupNos } = require("../config/teamsRoute");
 const { getAdminIds } = require("../config/admins");
 const configStore = require("../config/configStore");
+const submissionStore = require("../config/submissionStore");
 const { nowIso, formatElapsed, isLate } = require("./timeUtil");
 const event = require("../config/event");
 
@@ -34,23 +35,65 @@ function imageMsg(mapFile) {
   return { type: "image", originalContentUrl: url, previewImageUrl: url };
 }
 
+// 一小段「標籤＋內容」，過關公告卡片裡「地點／玩法／過關方式」都用這個排版
+function flexInfoRow(label, value) {
+  return {
+    type: "box",
+    layout: "vertical",
+    margin: "md",
+    contents: [
+      { type: "text", text: label, size: "xs", color: "#8a998e" },
+      { type: "text", text: value, size: "sm", wrap: true, color: "#22301f" },
+    ],
+  };
+}
+
+// 過關公告卡片：有地圖位置圖或現場照片時當封面（hero），沒有就是純文字卡片
+function checkpointFlexBubble(cp, heading, heroImage) {
+  return {
+    type: "bubble",
+    ...(heroImage
+      ? {
+          hero: {
+            type: "image",
+            url: mapUrl(heroImage),
+            size: "full",
+            aspectRatio: "20:13",
+            aspectMode: "cover",
+          },
+        }
+      : {}),
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        { type: "text", text: heading, weight: "bold", size: "lg", wrap: true, color: "#3a6b45" },
+        { type: "separator", margin: "md" },
+        flexInfoRow("📍 地點", cp.location),
+        flexInfoRow("🎮 玩法", cp.content),
+        flexInfoRow("✅ 過關方式", cp.scoringMethod),
+      ],
+    },
+  };
+}
+
 function checkpointAnnouncement(checkpointId, { isFirst = false } = {}) {
   const cp = getCheckpoint(checkpointId);
   const heading = isFirst
     ? `📍 請先移動到 ${cp.id}（${cp.name}）`
     : `🧭 請移動到 ${cp.id}（${cp.name}）`;
-  const body =
-    `${heading}\n\n` +
-    `📍 地點：${cp.location}\n` +
-    `🎮 玩法：${cp.content}\n` +
-    `✅ 過關方式：${cp.scoringMethod}`;
-  const messages = [textMsg(body)];
-  // 先送地圖位置圖（怎麼走到這關），再送現場照片（這關實際長什麼樣子／任務參考照）
-  for (const mapImage of cp.mapImages || []) {
-    messages.push(imageMsg(mapImage));
-  }
-  for (const sitePhoto of cp.sitePhotos || []) {
-    messages.push(imageMsg(sitePhoto));
+
+  const mapImages = cp.mapImages || [];
+  const sitePhotos = cp.sitePhotos || [];
+  // 地圖位置圖優先當卡片封面（怎麼走到這關比較急迫），現場照片留在卡片外當附加圖片參考
+  const heroImage = mapImages[0] || sitePhotos[0];
+  const extraImages = heroImage === mapImages[0] ? [...mapImages.slice(1), ...sitePhotos] : sitePhotos.slice(1);
+
+  const messages = [
+    { type: "flex", altText: heading, contents: checkpointFlexBubble(cp, heading, heroImage) },
+  ];
+  for (const img of extraImages) {
+    messages.push(imageMsg(img));
   }
   return messages;
 }
@@ -68,7 +111,7 @@ async function findMembership(exec, userId) {
 
 async function requireMembership(exec, userId) {
   const member = await findMembership(exec, userId);
-  if (!member) return { error: [textMsg("請先報到（輸入「報到 X組」，X 為您的組別編號）")] };
+  if (!member) return { error: [textMsg("🙋 請先報到（輸入「報到 X組」，X 為您的組別編號）")] };
   const team = await findTeam(exec, member.group_no);
   return { member, team };
 }
@@ -103,17 +146,17 @@ async function isProgressFrozen(exec) {
 
 async function checkin(groupNo, userId) {
   if (!getAllGroupNos().includes(groupNo)) {
-    return [textMsg(`第 ${groupNo} 組不存在，請確認組別編號是否正確（1～${getAllGroupNos().length}）。`)];
+    return [textMsg(`⚠️ 第 ${groupNo} 組不存在，請確認組別編號是否正確（1～${getAllGroupNos().length}）。`)];
   }
   return transaction(async (tx) => {
     const existing = await findMembership(tx, userId);
     if (existing) {
       if (existing.group_no === groupNo) {
-        return [textMsg(`您已完成第 ${groupNo} 組報到，請等待關主宣布出發。`)];
+        return [textMsg(`✅ 您已完成第 ${groupNo} 組報到，請等待關主宣布出發。`)];
       }
       return [
         textMsg(
-          `您先前已綁定為第 ${existing.group_no} 組，如需更正組別請聯繫小編協助「解除綁定」。`
+          `⚠️ 您先前已綁定為第 ${existing.group_no} 組，如需更正組別請聯繫小編協助「解除綁定」。`
         ),
       ];
     }
@@ -151,13 +194,13 @@ async function depart(groupNo) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
-      return { reply: [textMsg(`第 ${groupNo} 組尚未有任何成員報到，無法出發。`)] };
+      return { reply: [textMsg(`⚠️ 第 ${groupNo} 組尚未有任何成員報到，無法出發。`)] };
     }
     if (team.status === "IN_PROGRESS") {
-      return { reply: [textMsg(`第 ${groupNo} 組已經出發過了，正在闖關中。`)] };
+      return { reply: [textMsg(`🏃 第 ${groupNo} 組已經出發過了，正在闖關中。`)] };
     }
     if (team.status === "FINISHED") {
-      return { reply: [textMsg(`第 ${groupNo} 組已經辦理終點確認，無法再次出發。`)] };
+      return { reply: [textMsg(`🏁 第 ${groupNo} 組已經辦理終點確認，無法再次出發。`)] };
     }
 
     const route = getRoute(groupNo);
@@ -171,7 +214,7 @@ async function depart(groupNo) {
     const teamMessages = [textMsg(`🚩 第 ${groupNo} 組出發！開始計時。`), ...announcement];
 
     return {
-      reply: [textMsg(`已將第 ${groupNo} 組標記為出發。`)],
+      reply: [textMsg(`🚩 已將第 ${groupNo} 組標記為出發。`)],
       groupBroadcast: { groupNo, messages: teamMessages },
     };
   });
@@ -191,7 +234,7 @@ async function checkAttemptGuards(tx, userId) {
   if (error) return { blocked: error };
 
   if (team.status === "CHECKED_IN") {
-    return { blocked: [textMsg("尚未出發，請等待關主宣布出發。")] };
+    return { blocked: [textMsg("⏳ 尚未出發，請等待關主宣布出發。")] };
   }
   if (team.status === "FINISHED") {
     return { blocked: null }; // 已辦理終點確認的隊伍，系統不再回應
@@ -226,6 +269,8 @@ async function advanceCheckpoint(tx, team, expected, cp, route) {
     newIndex,
     team.group_no,
   ]);
+  // 該組通過這一關後，先前留在審核佇列裡的待審照片／影片就沒用了，一併清掉
+  await submissionStore.deleteSubmissionsForGroup(team.group_no);
 
   const confirm = textMsg(`✅ 通關：${cp.name}`);
 
@@ -250,12 +295,12 @@ async function verifyKeyword(userId, text) {
 
     if (cp.verifyType === "referee") {
       return [
-        textMsg("這一關由關主現場確認完成，不需要輸入任何文字，請等待關主或小編為您解鎖下一關。"),
+        textMsg("🙋 這一關由關主現場確認完成，不需要輸入任何文字，請等待關主或小編為您解鎖下一關。"),
       ];
     }
     if (cp.verifyType !== "keyword") {
       const kind = cp.verifyType === "video" ? "影片" : "照片";
-      return [textMsg(`這一關沒有現場關主，請直接上傳${kind}，不需要輸入文字關鍵字。`)];
+      return [textMsg(`📷 這一關沒有現場關主，請直接上傳${kind}，不需要輸入文字關鍵字。`)];
     }
     if (!matchesKeyword(text, expected.keyword)) {
       return [textMsg("❌ 不正確，請向關主確認。")];
@@ -267,7 +312,10 @@ async function verifyKeyword(userId, text) {
 
 // ---- 三之二、無關主的 6 關：上傳照片／影片後先送審，小編「通過 X組」才真正過關 ----
 
-async function submitMedia(userId) {
+// media（可省略）：{ buffer, mimeType } 是從 LINE 下載到的實際照片／影片內容，
+// 存進審核佇列讓後台網頁「照片／影片審核」分頁可以直接預覽。太大（見 submissionStore）或呼叫端沒傳就不存，
+// 退回純文字通知＋LINE聊天記錄查看的舊方式，行為不會壞掉。
+async function submitMedia(userId, media = null) {
   return transaction(async (tx) => {
     const guard = await checkAttemptGuards(tx, userId);
     if (guard.blocked !== undefined) return { reply: guard.blocked, adminNotify: [] };
@@ -277,7 +325,7 @@ async function submitMedia(userId) {
       return {
         reply: [
           textMsg(
-            "這一關由關主現場確認完成，不需要上傳照片或影片，請等待關主或小編為您解鎖下一關。"
+            "🙋 這一關由關主現場確認完成，不需要上傳照片或影片，請等待關主或小編為您解鎖下一關。"
           ),
         ],
         adminNotify: [],
@@ -285,20 +333,34 @@ async function submitMedia(userId) {
     }
     if (cp.verifyType === "keyword") {
       return {
-        reply: [textMsg("這一關需要向關主取得關鍵字才能過關，請直接輸入文字關鍵字。")],
+        reply: [textMsg("🔑 這一關需要向關主取得關鍵字才能過關，請直接輸入文字關鍵字。")],
         adminNotify: [],
       };
     }
 
     const kind = cp.verifyType === "video" ? "影片" : "照片";
+    let stored = false;
+    if (media) {
+      stored = await submissionStore.saveSubmission({
+        groupNo: team.group_no,
+        checkpointId: cp.id,
+        mediaType: cp.verifyType,
+        mimeType: media.mimeType,
+        buffer: media.buffer,
+        submittedBy: userId,
+      });
+    }
     const adminMessages = [
       textMsg(
-        `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}，請至官方帳號聊天記錄確認內容。\n` +
-          `確認沒問題請輸入「通過 ${team.group_no}組」解鎖下一關。`
+        stored
+          ? `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}，可至後台網頁「照片／影片審核」分頁直接預覽。\n` +
+              `確認沒問題請輸入「通過 ${team.group_no}組」，或直接在後台按「✅ 通過」解鎖下一關。`
+          : `📸 第 ${team.group_no} 組在「${cp.name}」上傳了${kind}，請至官方帳號聊天記錄確認內容。\n` +
+              `確認沒問題請輸入「通過 ${team.group_no}組」解鎖下一關。`
       ),
     ];
     return {
-      reply: [textMsg(`已收到您上傳的${kind}，請等待小編確認後解鎖下一關。`)],
+      reply: [textMsg(`📮 已收到您上傳的${kind}，請等待小編確認後解鎖下一關。`)],
       adminNotify: getAdminIds().map((adminId) => ({ to: adminId, messages: adminMessages })),
     };
   });
@@ -313,25 +375,25 @@ async function approveCheckpoint(groupNo, restrictToCheckpointId = null) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
-      return { reply: [textMsg(`第 ${groupNo} 組尚未有任何成員報到。`)] };
+      return { reply: [textMsg(`⚠️ 第 ${groupNo} 組尚未有任何成員報到。`)] };
     }
     if (team.status === "CHECKED_IN") {
-      return { reply: [textMsg(`第 ${groupNo} 組尚未出發。`)] };
+      return { reply: [textMsg(`⏳ 第 ${groupNo} 組尚未出發。`)] };
     }
     if (team.status === "FINISHED") {
-      return { reply: [textMsg(`第 ${groupNo} 組已經辦理終點確認，無需再確認關卡。`)] };
+      return { reply: [textMsg(`🏁 第 ${groupNo} 組已經辦理終點確認，無需再確認關卡。`)] };
     }
 
     const route = getRoute(groupNo);
     if (team.current_index >= route.length) {
-      return { reply: [textMsg(`第 ${groupNo} 組已完成全部 ${route.length} 關，無需再確認。`)] };
+      return { reply: [textMsg(`🎉 第 ${groupNo} 組已完成全部 ${route.length} 關，無需再確認。`)] };
     }
 
     if (await isProgressFrozen(tx)) {
       return {
         reply: [
           textMsg(
-            `已停止受理新的關卡進度，無法再為第 ${groupNo} 組確認關卡（終點確認功能不受影響）。`
+            `⏰ 已停止受理新的關卡進度，無法再為第 ${groupNo} 組確認關卡（終點確認功能不受影響）。`
           ),
         ],
       };
@@ -344,7 +406,7 @@ async function approveCheckpoint(groupNo, restrictToCheckpointId = null) {
       return {
         reply: [
           textMsg(
-            `第 ${groupNo} 組目前這關是「${cp.name}」（${cp.id}），不是您登記的關卡，無法用這個帳號通過。`
+            `⚠️ 第 ${groupNo} 組目前這關是「${cp.name}」（${cp.id}），不是您登記的關卡，無法用這個帳號通過。`
           ),
         ],
       };
@@ -352,10 +414,40 @@ async function approveCheckpoint(groupNo, restrictToCheckpointId = null) {
 
     const teamMessages = await advanceCheckpoint(tx, team, expected, cp, route);
     return {
-      reply: [textMsg(`已為第 ${groupNo} 組確認「${cp.name}」通過。`)],
+      reply: [textMsg(`✅ 已為第 ${groupNo} 組確認「${cp.name}」通過。`)],
       groupBroadcast: { groupNo, messages: teamMessages },
     };
   });
+}
+
+// 給後台網頁「照片／影片審核」分頁：待審核清單（含關卡名稱），以及按鈕「通過」「移除」對應的動作
+async function listPendingSubmissions() {
+  const rows = await submissionStore.listPending();
+  return rows.map((r) => {
+    let checkpointName = r.checkpoint_id;
+    try {
+      checkpointName = getCheckpoint(r.checkpoint_id).name;
+    } catch {
+      // 關卡設定被刪掉的極端情況，退回顯示代號
+    }
+    return {
+      id: r.id,
+      groupNo: r.group_no,
+      checkpointId: r.checkpoint_id,
+      checkpointName,
+      mediaType: r.media_type,
+      submittedAt: r.submitted_at,
+    };
+  });
+}
+
+async function approveSubmissionById(id) {
+  const meta = await submissionStore.getSubmissionMeta(id);
+  if (!meta) {
+    return { reply: [textMsg("這筆待審核紀錄已經不存在了，可能已經被處理過。")] };
+  }
+  // 後台網頁按「通過」視同小編權限，不限制關卡（跟 LINE 指令「通過 X組」小編那條路徑一致）
+  return approveCheckpoint(meta.group_no, null);
 }
 
 // ---- 三之五、關主自助登記：「我是 B3 關主」----
@@ -366,14 +458,14 @@ async function registerReferee(userId, checkpointId) {
   try {
     cp = getCheckpoint(checkpointId);
   } catch {
-    return [textMsg(`找不到關卡代號「${checkpointId}」，請確認輸入是否正確。`)];
+    return [textMsg(`⚠️ 找不到關卡代號「${checkpointId}」，請確認輸入是否正確。`)];
   }
 
   const membership = await findMembership(db, userId);
   if (membership) {
     return [
       textMsg(
-        `您已經是第 ${membership.group_no} 組的成員，無法同時登記為關主。若這是誤觸的隊伍報到，請聯繫小編協助「解除綁定」後再重新登記。`
+        `⚠️ 您已經是第 ${membership.group_no} 組的成員，無法同時登記為關主。若這是誤觸的隊伍報到，請聯繫小編協助「解除綁定」後再重新登記。`
       ),
     ];
   }
@@ -441,7 +533,7 @@ async function registerBroadcaster(userId) {
   if (membership) {
     return [
       textMsg(
-        `您已經是第 ${membership.group_no} 組的成員，無法同時登記為總領隊。若這是誤觸的隊伍報到，請聯繫小編協助「解除綁定」後再重新登記。`
+        `⚠️ 您已經是第 ${membership.group_no} 組的成員，無法同時登記為總領隊。若這是誤觸的隊伍報到，請聯繫小編協助「解除綁定」後再重新登記。`
       ),
     ];
   }
@@ -468,6 +560,17 @@ async function resetBroadcasters() {
   return [textMsg("♻️ 已清空所有總領隊登記。")];
 }
 
+// 給後台網頁看目前有哪些人登記成總領隊（不含 userId 全碼，只顯示末 6 碼方便辨識，保留一點隱私）
+async function listBroadcasters() {
+  const rows = await db.all(
+    "SELECT user_id, registered_at FROM broadcasters ORDER BY registered_at"
+  );
+  return rows.map((r) => ({
+    userIdSuffix: r.user_id.slice(-6),
+    registeredAt: r.registered_at,
+  }));
+}
+
 // 對所有「目前有隊長的組別」廣播一則文字訊息（尚未有人報到、還沒產生隊長的組不會收到）
 async function broadcastToLeaders(text) {
   const rows = await db.all(
@@ -478,8 +581,8 @@ async function broadcastToLeaders(text) {
   const reply = [
     textMsg(
       rows.length > 0
-        ? `已群發給 ${rows.length} 位小隊長。`
-        : "目前尚無隊伍報到，沒有小隊長可以接收群發。"
+        ? `📢 已群發給 ${rows.length} 位小隊長。`
+        : "⚠️ 目前尚無隊伍報到，沒有小隊長可以接收群發。"
     ),
   ];
   return { reply, directPushes };
@@ -493,7 +596,7 @@ async function revertLastCheckpoint(groupNo) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
-      return { reply: [textMsg(`第 ${groupNo} 組尚未有任何成員報到。`)] };
+      return { reply: [textMsg(`⚠️ 第 ${groupNo} 組尚未有任何成員報到。`)] };
     }
 
     if (team.status === "FINISHED") {
@@ -502,7 +605,7 @@ async function revertLastCheckpoint(groupNo) {
         [groupNo]
       );
       return {
-        reply: [textMsg(`已取消第 ${groupNo} 組的終點確認，該組恢復為闖關中，計時繼續累加。`)],
+        reply: [textMsg(`♻️ 已取消第 ${groupNo} 組的終點確認，該組恢復為闖關中，計時繼續累加。`)],
         groupBroadcast: {
           groupNo,
           messages: [
@@ -513,7 +616,7 @@ async function revertLastCheckpoint(groupNo) {
     }
 
     if (team.status === "CHECKED_IN" || team.current_index === 0) {
-      return { reply: [textMsg(`第 ${groupNo} 組目前沒有可以退回的關卡進度。`)] };
+      return { reply: [textMsg(`⚠️ 第 ${groupNo} 組目前沒有可以退回的關卡進度。`)] };
     }
 
     const newIndex = team.current_index - 1;
@@ -531,7 +634,7 @@ async function revertLastCheckpoint(groupNo) {
     ]);
 
     return {
-      reply: [textMsg(`已將第 ${groupNo} 組退回到「${cp.name}」，該關重新視為未完成。`)],
+      reply: [textMsg(`♻️ 已將第 ${groupNo} 組退回到「${cp.name}」，該關重新視為未完成。`)],
       groupBroadcast: {
         groupNo,
         messages: [
@@ -550,17 +653,17 @@ async function finishAtB6(groupNo) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
-      return { reply: [textMsg(`第 ${groupNo} 組尚未有任何成員報到，無法辦理終點確認。`)] };
+      return { reply: [textMsg(`⚠️ 第 ${groupNo} 組尚未有任何成員報到，無法辦理終點確認。`)] };
     }
     if (team.status === "CHECKED_IN") {
-      return { reply: [textMsg(`第 ${groupNo} 組尚未出發，無法辦理終點確認。`)] };
+      return { reply: [textMsg(`⏳ 第 ${groupNo} 組尚未出發，無法辦理終點確認。`)] };
     }
     if (team.status === "FINISHED") {
       const elapsed = formatElapsed(team.start_time, team.finish_time);
       return {
         reply: [
           textMsg(
-            `第 ${groupNo} 組已經辦理過終點確認了。\n完成關卡數：${team.current_index}/${event.totalCheckpoints}\n總耗時：${elapsed}`
+            `🏁 第 ${groupNo} 組已經辦理過終點確認了。\n完成關卡數：${team.current_index}/${event.totalCheckpoints}\n總耗時：${elapsed}`
           ),
         ],
       };
@@ -588,7 +691,7 @@ async function finishAtB6(groupNo) {
     return {
       reply: [
         textMsg(
-          `已為第 ${groupNo} 組辦理終點確認。完成關卡數：${team.current_index}/${event.totalCheckpoints}，總耗時：${elapsed}${late ? "（逾時）" : ""}`
+          `🏁 已為第 ${groupNo} 組辦理終點確認。完成關卡數：${team.current_index}/${event.totalCheckpoints}，總耗時：${elapsed}${late ? "（逾時）" : ""}`
         ),
       ],
       groupBroadcast: { groupNo, messages: teamMessages },
@@ -621,16 +724,16 @@ async function requestLeaderTransfer(groupNo, requesterUserId) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
-      return { reply: [textMsg(`第 ${groupNo} 組尚無人報到，無法接任隊長。`)] };
+      return { reply: [textMsg(`⚠️ 第 ${groupNo} 組尚無人報到，無法接任隊長。`)] };
     }
     const member = await findMembership(tx, requesterUserId);
     if (!member || member.group_no !== groupNo) {
       return {
-        reply: [textMsg(`您並非第 ${groupNo} 組成員，請先以組員身分完成報到。`)],
+        reply: [textMsg(`⚠️ 您並非第 ${groupNo} 組成員，請先以組員身分完成報到。`)],
       };
     }
     if (member.role === "LEADER") {
-      return { reply: [textMsg("您已經是本組隊長囉。")] };
+      return { reply: [textMsg("👑 您已經是本組隊長囉。")] };
     }
 
     const ts = nowIso();
@@ -651,7 +754,7 @@ async function requestLeaderTransfer(groupNo, requesterUserId) {
     }));
 
     return {
-      reply: [textMsg("已送出接任隊長申請，請等待小編確認。")],
+      reply: [textMsg("📨 已送出接任隊長申請，請等待小編確認。")],
       pushes: adminPushes,
     };
   });
@@ -660,7 +763,7 @@ async function requestLeaderTransfer(groupNo, requesterUserId) {
 async function confirmLeaderTransfer(groupNo) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
-    if (!team) return [textMsg(`第 ${groupNo} 組尚無人報到。`)];
+    if (!team) return [textMsg(`⚠️ 第 ${groupNo} 組尚無人報到。`)];
 
     const pending = await tx.all(
       `SELECT * FROM leader_transfer_requests WHERE group_no = ? AND status = 'PENDING' ORDER BY id DESC`,
@@ -668,7 +771,7 @@ async function confirmLeaderTransfer(groupNo) {
     );
 
     if (pending.length === 0) {
-      return [textMsg(`目前沒有第 ${groupNo} 組的換隊長申請。`)];
+      return [textMsg(`⚠️ 目前沒有第 ${groupNo} 組的換隊長申請。`)];
     }
 
     const latest = pending[0];
@@ -707,8 +810,9 @@ async function unbindGroup(groupNo) {
       groupNo,
     ]);
     await tx.run("DELETE FROM teams WHERE group_no = ?", [groupNo]);
+    await submissionStore.deleteSubmissionsForGroup(groupNo);
     return [
-      textMsg(`已清空第 ${groupNo} 組所有綁定帳號與報到狀態，可重新報到。`),
+      textMsg(`♻️ 已清空第 ${groupNo} 組所有綁定帳號與報到狀態，可重新報到。`),
     ];
   });
 }
@@ -720,7 +824,7 @@ async function addBonusPoints(groupNo, points, reason, awardedByUserId) {
   return transaction(async (tx) => {
     const team = await findTeam(tx, groupNo);
     if (!team) {
-      return [textMsg(`第 ${groupNo} 組尚未有任何成員報到，無法加分。`)];
+      return [textMsg(`⚠️ 第 ${groupNo} 組尚未有任何成員報到，無法加分。`)];
     }
     await tx.run("UPDATE teams SET bonus_points = bonus_points + ? WHERE group_no = ?", [
       points,
@@ -742,6 +846,20 @@ async function addBonusPoints(groupNo, points, reason, awardedByUserId) {
   });
 }
 
+// 給後台網頁看每一筆加分／扣分紀錄的明細（誰、何時、加了多少、理由），awardedBy 只顯示 userId 末 6 碼
+async function listBonusLog() {
+  const rows = await db.all(
+    "SELECT group_no, points, reason, awarded_by, awarded_at FROM bonus_log ORDER BY awarded_at DESC"
+  );
+  return rows.map((r) => ({
+    groupNo: r.group_no,
+    points: r.points,
+    reason: r.reason,
+    awardedBySuffix: r.awarded_by.slice(-6),
+    awardedAt: r.awarded_at,
+  }));
+}
+
 // ---- 八、重置整場遊戲（小編用，非文件原始條款，供活動前彩排／正式開賽前重置）----
 
 async function resetGame() {
@@ -752,6 +870,7 @@ async function resetGame() {
     await tx.run("DELETE FROM teams");
     await tx.run("DELETE FROM settings");
     await tx.run("DELETE FROM bonus_log");
+    await tx.run("DELETE FROM pending_submissions");
     return [textMsg("♻️ 已重置整場遊戲，所有組別的報到、進度與紀錄皆已清空。")];
   });
 }
@@ -763,13 +882,13 @@ async function queryCurrentCheckpoint(userId) {
   if (error) return error;
 
   if (team.status === "CHECKED_IN") {
-    return [textMsg("尚未出發，請等待關主宣布出發。")];
+    return [textMsg("⏳ 尚未出發，請等待關主宣布出發。")];
   }
   if (team.status === "FINISHED") {
     const elapsed = formatElapsed(team.start_time, team.finish_time);
     return [
       textMsg(
-        `貴隊已完成終點確認。\n完成關卡數：${team.current_index}/${event.totalCheckpoints}\n總耗時：${elapsed}`
+        `🏁 貴隊已完成終點確認。\n完成關卡數：${team.current_index}/${event.totalCheckpoints}\n總耗時：${elapsed}`
       ),
     ];
   }
@@ -787,13 +906,13 @@ async function queryProgress(userId) {
   if (error) return error;
 
   if (team.status === "CHECKED_IN") {
-    return [textMsg("尚未出發。")];
+    return [textMsg("⏳ 尚未出發。")];
   }
   if (team.status === "FINISHED") {
     const elapsed = formatElapsed(team.start_time, team.finish_time);
     return [
       textMsg(
-        `已完成 ${team.current_index}/${event.totalCheckpoints} 關\n總耗時：${elapsed}（已終點確認）`
+        `🏁 已完成 ${team.current_index}/${event.totalCheckpoints} 關\n總耗時：${elapsed}（已終點確認）`
       ),
     ];
   }
@@ -802,7 +921,7 @@ async function queryProgress(userId) {
   const note = frozen ? "\n（已停止新增關卡進度，請儘速前往 B6 辦理終點確認）" : "";
   return [
     textMsg(
-      `已完成 ${team.current_index}/${event.totalCheckpoints} 關\n累計耗時（尚未歸隊）：${elapsed}${note}`
+      `🚶 已完成 ${team.current_index}/${event.totalCheckpoints} 關\n累計耗時（尚未歸隊）：${elapsed}${note}`
     ),
   ];
 }
@@ -944,6 +1063,8 @@ module.exports = {
   verifyKeyword,
   submitMedia,
   approveCheckpoint,
+  listPendingSubmissions,
+  approveSubmissionById,
   registerReferee,
   getRefereeCheckpoint,
   resetReferees,
@@ -952,6 +1073,7 @@ module.exports = {
   registerBroadcaster,
   isBroadcaster,
   resetBroadcasters,
+  listBroadcasters,
   broadcastToLeaders,
   revertLastCheckpoint,
   finishAtB6,
@@ -960,6 +1082,7 @@ module.exports = {
   confirmLeaderTransfer,
   unbindGroup,
   addBonusPoints,
+  listBonusLog,
   resetGame,
   queryCurrentCheckpoint,
   queryProgress,

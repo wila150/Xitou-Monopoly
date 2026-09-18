@@ -9,7 +9,16 @@ const middlewareConfig = {
 };
 
 const client = new line.messagingApi.MessagingApiClient(messagingApiConfig);
+const blobClient = new line.messagingApi.MessagingApiBlobClient(messagingApiConfig);
 const webhookMiddleware = line.middleware(middlewareConfig);
+
+// 下載使用者傳來的照片／影片內容（給審核佇列存進資料庫用），回傳整個 Buffer。
+async function getMessageContent(messageId) {
+  const stream = await blobClient.getMessageContent(messageId);
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
 
 // LINE 一次 reply/push 最多 5 則訊息
 function chunk(messages, size = 5) {
@@ -44,4 +53,4 @@ async function pushToMany(userIds, messages) {
   await Promise.all(userIds.map((userId) => push(userId, messages)));
 }
 
-module.exports = { client, webhookMiddleware, reply, push, pushToMany };
+module.exports = { client, webhookMiddleware, reply, push, pushToMany, getMessageContent };

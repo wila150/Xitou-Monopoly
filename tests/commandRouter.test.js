@@ -41,6 +41,26 @@ function textsOf(result) {
   return (result.reply || []).filter((m) => m.type === "text").map((m) => m.text);
 }
 
+// 過關公告（checkpointAnnouncement）改用 Flex 卡片後，文字內容跑進 flex.contents 的節點裡，
+// 遞迴撈出所有 text 節點的內容，方便測試斷言卡片裡有沒有出現特定字樣。
+function flattenFlexText(node, out) {
+  if (!node || typeof node !== "object") return;
+  if (node.type === "text" && typeof node.text === "string") out.push(node.text);
+  if (Array.isArray(node.contents)) node.contents.forEach((c) => flattenFlexText(c, out));
+  for (const key of ["hero", "body", "header", "footer"]) {
+    if (node[key]) flattenFlexText(node[key], out);
+  }
+}
+
+function allTexts(messages) {
+  const out = [];
+  for (const m of messages || []) {
+    if (m.type === "text") out.push(m.text);
+    if (m.type === "flex") flattenFlexText(m.contents, out);
+  }
+  return out;
+}
+
 // 模擬「隊伍上傳照片／影片 -> 小編輸入通過 X組」完整流程，回傳隊伍實際收到的過關訊息
 async function passMediaCheckpoint(userId, groupNo) {
   await teamService.submitMedia(userId);
@@ -109,13 +129,13 @@ test("出發：未報到組別無法出發，成功後廣播第一關", async ()
   const depart = await commandRouter.route(ADMIN, "出發 1組");
   assert.equal(depart.groupBroadcasts.length, 1);
   assert.equal(depart.groupBroadcasts[0].groupNo, 1);
-  const broadcastTexts = depart.groupBroadcasts[0].messages
-    .filter((m) => m.type === "text")
-    .map((m) => m.text);
+  // 過關公告改用 Flex 卡片，「地點／過關方式」文字跑進卡片節點裡，用 allTexts 遞迴撈出來檢查
+  const broadcastTexts = allTexts(depart.groupBroadcasts[0].messages);
+  assert.ok(depart.groupBroadcasts[0].messages.some((m) => m.type === "flex"));
   assert.ok(broadcastTexts.some((t) => t.includes("出發")));
   assert.ok(broadcastTexts.some((t) => t.includes("請先移動到")));
-  assert.ok(broadcastTexts.some((t) => t.includes("📍 地點：")));
-  assert.ok(broadcastTexts.some((t) => t.includes("✅ 過關方式：")));
+  assert.ok(broadcastTexts.some((t) => t.includes("地點")));
+  assert.ok(broadcastTexts.some((t) => t.includes("過關方式")));
 
   const again = await commandRouter.route(ADMIN, "出發 1組");
   assert.match(textsOf(again)[0], /已經出發過了/);
@@ -207,6 +227,32 @@ test("照片／影片審核：上傳後不會自動過關，小編通過才解�
 
   const teamAfter = await teamService.findTeam(1);
   assert.equal(teamAfter.current_index, 1);
+});
+
+test("照片／影片審核佇列：後台網頁可以看到待審核媒體，按通過會過關並清空佇列", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組");
+  // 第1組路線第一關是 D5（無關主，photo）
+
+  const submit = await teamService.submitMedia("Uleader", {
+    buffer: Buffer.from("fake-jpeg-bytes"),
+    mimeType: "image/jpeg",
+  });
+  assert.match(submit.adminNotify[0].messages[0].text, /照片／影片審核」分頁直接預覽/);
+
+  const pending = await teamService.listPendingSubmissions();
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].groupNo, 1);
+  assert.equal(pending[0].mediaType, "photo");
+
+  const approved = await teamService.approveSubmissionById(pending[0].id);
+  assert.match(approved.reply[0].text, /已為第 1 組確認/);
+  assert.equal(approved.groupBroadcast.groupNo, 1);
+
+  // 通過後審核佇列應該被清空（該組所有待審核紀錄都失效了）
+  assert.equal((await teamService.listPendingSubmissions()).length, 0);
+  assert.equal((await teamService.findTeam(1)).current_index, 1);
 });
 
 test("關卡型態不符：關主關卡上傳照片、無關主關卡輸入文字，都會提示正確方式", async () => {
@@ -437,6 +483,14 @@ test("加分：小編可以任意時機幫某組加分／扣分，會影響排�
   // 扣分：負數也支援，且可以用中文數字＋不加「第」的組別格式
   const penalty = await commandRouter.route(ADMIN, "加分 二組 -8 犯規扣分");
   assert.match(textsOf(penalty)[0], /已為第 2 組扣分 8 分（理由：犯規扣分），目前累計加分：-3/);
+
+  // 後台網頁「加分紀錄」分頁：每一筆加分／扣分都留有明細，最新的排最前面
+  const log = await teamService.listBonusLog();
+  assert.equal(log.length, 2);
+  assert.equal(log[0].points, -8);
+  assert.equal(log[0].reason, "犯規扣分");
+  assert.equal(log[1].points, 5);
+  assert.equal(log[1].reason, "完成指定任務");
 });
 
 test("加分：對尚未報到的組別加分會被拒絕", async () => {
@@ -617,6 +671,11 @@ test("總領隊自助登記：登記後可以用「群發」對所有小隊長�
 
   const register = await commandRouter.route(STAFF, "總領綁定");
   assert.match(textsOf(register)[0], /已登記為總領隊/);
+
+  // 後台網頁「總領隊名單」分頁：登記後應該看得到這個人
+  const list = await teamService.listBroadcasters();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].userIdSuffix, STAFF.slice(-6));
 
   const broadcast = await commandRouter.route(STAFF, "群發 明天集合時間改成早上八點");
   assert.match(textsOf(broadcast)[0], /已群發給 2 位小隊長/);

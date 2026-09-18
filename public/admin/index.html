@@ -18,6 +18,9 @@
     <button class="tab-btn" data-tab="progress">即時進度</button>
     <button class="tab-btn" data-tab="referees">關主名單</button>
     <button class="tab-btn" data-tab="leaders">小隊長名單</button>
+    <button class="tab-btn" data-tab="broadcasters">總領隊名單</button>
+    <button class="tab-btn" data-tab="submissions">照片／影片審核</button>
+    <button class="tab-btn" data-tab="bonus-log">加分紀錄</button>
     <button class="tab-btn" data-tab="welcome">加好友歡迎詞</button>
     <button class="tab-btn" data-tab="commands">指令說明</button>
   </nav>
@@ -84,6 +87,43 @@
       <table>
         <thead><tr><th>組別</th><th>LINE 帳號（末 6 碼）</th><th>狀態</th><th>報到時間</th></tr></thead>
         <tbody id="leaders-body"></tbody>
+      </table>
+    </section>
+
+    <!-- 總領隊名單 -->
+    <section class="panel" id="panel-broadcasters">
+      <div class="toolbar">
+        <button class="btn secondary" id="refresh-broadcasters">🔄 重新整理</button>
+      </div>
+      <p style="font-size:13px;color:#666;">
+        自助登記為總領隊的帳號（輸入「總領綁定」登記），「群發 訊息內容」實際會送到這裡列出的人，再加上所有小編。
+      </p>
+      <table>
+        <thead><tr><th>LINE 帳號（末 6 碼）</th><th>登記時間</th></tr></thead>
+        <tbody id="broadcasters-body"></tbody>
+      </table>
+    </section>
+
+    <!-- 照片／影片審核佇列 -->
+    <section class="panel" id="panel-submissions">
+      <div class="toolbar">
+        <button class="btn secondary" id="refresh-submissions">🔄 重新整理</button>
+      </div>
+      <div class="msg" id="submissions-msg"></div>
+      <p style="font-size:13px;color:#666;">
+        隊伍在沒有關主的關卡上傳照片／影片後會出現在這裡，不用再翻 LINE 聊天記錄。按「✅ 通過」直接解鎖下一關；按「🗑 移除」只是清掉這筆待審核紀錄，不會影響隊伍進度（例如上傳錯誤、想請隊伍重傳）。
+      </p>
+      <div class="card-list" id="submissions-list"></div>
+    </section>
+
+    <!-- 加分紀錄 -->
+    <section class="panel" id="panel-bonus-log">
+      <div class="toolbar">
+        <button class="btn secondary" id="refresh-bonus-log">🔄 重新整理</button>
+      </div>
+      <table>
+        <thead><tr><th>組別</th><th>分數</th><th>理由</th><th>操作人（末 6 碼）</th><th>時間</th></tr></thead>
+        <tbody id="bonus-log-body"></tbody>
       </table>
     </section>
 

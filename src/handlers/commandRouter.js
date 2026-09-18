@@ -55,16 +55,16 @@ function withReply(reply) {
 }
 
 function adminOnlyDenied() {
-  return withReply([teamService.textMsg("此指令僅限小編使用。")]);
+  return withReply([teamService.textMsg("🚫 此指令僅限小編使用。")]);
 }
 
 function approveOnlyDenied() {
-  return withReply([teamService.textMsg("此指令僅限小編或登記過的關主使用。")]);
+  return withReply([teamService.textMsg("🚫 此指令僅限小編或登記過的關主使用。")]);
 }
 
 function broadcastOnlyDenied() {
   return withReply([
-    teamService.textMsg("此指令僅限小編或登記過的總領隊使用，請先輸入「總領綁定」進行登記。"),
+    teamService.textMsg("🚫 此指令僅限小編或登記過的總領隊使用，請先輸入「總領綁定」進行登記。"),
   ]);
 }
 
@@ -78,14 +78,14 @@ async function route(userId, rawText) {
 
   if (text === "我的ID" || text === "我的id" || text === "我的Id") {
     // 查詢自己的 LINE userId，方便小編設定 ADMIN_USER_IDS 或關主／總領隊排查問題用，任何人都可以查自己的
-    return withReply([teamService.textMsg(`您的 userId：\n${userId}`)]);
+    return withReply([teamService.textMsg(`🆔 您的 userId：\n${userId}`)]);
   }
 
   if (text === "報到") {
     // 圖文選單「報到」按鈕會送出這個固定文字（組別編號因人而異，選單按鈕沒辦法直接帶號碼）
     return withReply([
       teamService.textMsg(
-        "請回覆您的組別編號完成報到，例如「1組」或「第一組」（第一位報到的人會是隊長）。"
+        "🙋 請回覆您的組別編號完成報到，例如「1組」或「第一組」（第一位報到的人會是隊長）。"
       ),
     ]);
   }
@@ -162,7 +162,7 @@ async function route(userId, rawText) {
   if (text === "完賽") {
     return withReply([
       teamService.textMsg(
-        "本活動已改為「終點確認」制：請將隊伍實際帶到 B6，由 B6 終點工作人員為您辦理終點確認，不需要自行輸入「完賽」。"
+        "ℹ️ 本活動已改為「終點確認」制：請將隊伍實際帶到 B6，由 B6 終點工作人員為您辦理終點確認，不需要自行輸入「完賽」。"
       ),
     ]);
   }
@@ -181,8 +181,8 @@ async function route(userId, rawText) {
     const reply = [
       teamService.textMsg(
         alreadyFrozen
-          ? "已經是停止受理新關卡進度的狀態了。"
-          : `已停止受理新的關卡進度（尚在闖關中的 ${groupNos.length} 組會收到通知）。終點確認功能不受影響。`
+          ? "⏰ 已經是停止受理新關卡進度的狀態了。"
+          : `⏰ 已停止受理新的關卡進度（尚在闖關中的 ${groupNos.length} 組會收到通知）。終點確認功能不受影響。`
       ),
     ];
     return { reply, groupBroadcasts, directPushes: [] };
@@ -270,7 +270,7 @@ async function route(userId, rawText) {
   if (text === "排行榜") {
     if (!isAdmin(userId) && !(await teamService.isRankingPublic())) {
       return withReply([
-        teamService.textMsg("排行榜目前僅開放小編查詢，請稍候。"),
+        teamService.textMsg("🔒 排行榜目前僅開放小編查詢，請稍候。"),
       ]);
     }
     return withReply(await teamService.formatRanking());
@@ -279,13 +279,13 @@ async function route(userId, rawText) {
   if (text === "排行榜開啟") {
     if (!isAdmin(userId)) return adminOnlyDenied();
     await teamService.setRankingPublic(true);
-    return withReply([teamService.textMsg("已開啟排行榜公開查詢。")]);
+    return withReply([teamService.textMsg("🏆 已開啟排行榜公開查詢。")]);
   }
 
   if (text === "排行榜關閉") {
     if (!isAdmin(userId)) return adminOnlyDenied();
     await teamService.setRankingPublic(false);
-    return withReply([teamService.textMsg("已關閉排行榜公開查詢，僅小編可查詢。")]);
+    return withReply([teamService.textMsg("🔒 已關閉排行榜公開查詢，僅小編可查詢。")]);
   }
 
   // 以上皆非固定指令 -> 視為關卡關鍵字嘗試（有現場關主的 6 關）

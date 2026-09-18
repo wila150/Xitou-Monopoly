@@ -149,6 +149,21 @@ CREATE TABLE IF NOT EXISTS checkpoint_images (
   uploaded_at  TEXT NOT NULL
 );
 
+-- 沒有現場關主的關卡：隊伍上傳照片／影片後先存在這裡（bytea），後台網頁「照片／影片審核」分頁
+-- 可以直接預覽內容再決定通過，不用再翻 LINE 聊天記錄。小編按下「通過」或用 LINE 指令「通過 X組」
+-- 解鎖下一關後，該組所有待審核紀錄都會被刪除（見 teamService.deleteSubmissionsForGroup）。
+-- 影片超過大小上限（見 submissionStore.js）不會存進這張表，退回原本的純文字通知方式。
+CREATE TABLE IF NOT EXISTS pending_submissions (
+  id             SERIAL PRIMARY KEY,
+  group_no       INTEGER NOT NULL,
+  checkpoint_id  TEXT NOT NULL,
+  media_type     TEXT NOT NULL,
+  mime_type      TEXT NOT NULL,
+  data           BYTEA NOT NULL,
+  submitted_by   TEXT NOT NULL,
+  submitted_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS team_route_configs (
   group_no       INTEGER NOT NULL,
   order_index    INTEGER NOT NULL,
