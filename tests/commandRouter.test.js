@@ -121,6 +121,23 @@ test("出發：未報到組別無法出發，成功後廣播第一關", async ()
   assert.match(textsOf(again)[0], /已經出發過了/);
 });
 
+test("關卡公告推播範圍：預設只推隊長，切成 all 之後改推全組成員，可以隨時切回來", async () => {
+  await resetGame();
+  await commandRouter.route("Uleader", "報到 1組"); // 第一位報到者是隊長
+  await commandRouter.route("Umember", "報到 1組");
+
+  assert.equal(configStore.getBroadcastScope(), "leader");
+  const leaderOnly = await teamService.getGroupBroadcastRecipientIds(1);
+  assert.deepEqual(leaderOnly, ["Uleader"]);
+
+  await configStore.setBroadcastScope("all");
+  const allMembers = await teamService.getGroupBroadcastRecipientIds(1);
+  assert.deepEqual(new Set(allMembers), new Set(["Uleader", "Umember"]));
+
+  await configStore.setBroadcastScope("leader");
+  assert.deepEqual(await teamService.getGroupBroadcastRecipientIds(1), ["Uleader"]);
+});
+
 test("關鍵字：答錯提示錯誤、答對晉級、全破後提示前往B6", async () => {
   await resetGame();
   await commandRouter.route("Uleader", "報到 1組");
@@ -598,7 +615,7 @@ test("總領隊自助登記：登記後可以用「群發」對所有小隊長�
   const denied = await commandRouter.route(STAFF, "群發 明天集合時間改成早上八點");
   assert.match(textsOf(denied)[0], /僅限小編或登記過的總領隊使用/);
 
-  const register = await commandRouter.route(STAFF, "我是總領隊");
+  const register = await commandRouter.route(STAFF, "總領綁定");
   assert.match(textsOf(register)[0], /已登記為總領隊/);
 
   const broadcast = await commandRouter.route(STAFF, "群發 明天集合時間改成早上八點");
@@ -613,7 +630,7 @@ test("總領隊自助登記：已經報到綁定隊伍的人不能登記成總�
   await resetGame();
   await commandRouter.route("Uleader", "報到 1組");
 
-  const denied = await commandRouter.route("Uleader", "我是總領隊");
+  const denied = await commandRouter.route("Uleader", "總領綁定");
   assert.match(textsOf(denied)[0], /已經是第 1 組的成員，無法同時登記為總領隊/);
 
   const broadcast = await commandRouter.route(ADMIN, "群發 測試訊息");
@@ -622,7 +639,7 @@ test("總領隊自助登記：已經報到綁定隊伍的人不能登記成總�
 
 test("重置總領隊：小編可以清空所有總領隊登記，非小編不能用", async () => {
   await resetGame();
-  await commandRouter.route(STAFF, "我是總領隊");
+  await commandRouter.route(STAFF, "總領綁定");
   assert.equal(await teamService.isBroadcaster(STAFF), true);
 
   const denied = await commandRouter.route(STAFF, "重置總領隊");
@@ -636,7 +653,7 @@ test("重置總領隊：小編可以清空所有總領隊登記，非小編不�
 test("同一帳號可以同時是關主又是總領隊，兩種登記互不影響", async () => {
   await resetGame();
   await commandRouter.route(STAFF, "我是B3關主");
-  await commandRouter.route(STAFF, "我是總領隊");
+  await commandRouter.route(STAFF, "總領綁定");
 
   assert.equal(await teamService.getRefereeCheckpoint(STAFF), "B3");
   assert.equal(await teamService.isBroadcaster(STAFF), true);

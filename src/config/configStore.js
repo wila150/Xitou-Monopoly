@@ -14,6 +14,13 @@ const imageStore = require("./imageStore");
 let checkpointsById = {};
 let routesByGroup = new Map();
 let welcomeMessage = "";
+let broadcastScope = "leader";
+
+const VALID_BROADCAST_SCOPES = ["leader", "all"];
+// 關卡公告（checkpointAnnouncement／出發／通過…）要推播給整組所有成員，還是只推隊長一人——
+// 只推隊長可以大幅減少 LINE Messaging API 計費的推播則數（則數＝請求次數 x 收件人數），
+// 現場隊伍本來就在一起，隊長收到後口頭轉達即可；後台網頁「即時進度」分頁可以切換。
+const DEFAULT_BROADCAST_SCOPE = "leader";
 
 // 加好友時的預設歡迎詞，僅在 app_config 表第一次是空的時候當種子值寫入；
 // 之後小編在後台網頁編輯過，就一律以資料庫內容為準。
@@ -78,6 +85,13 @@ async function seedIfEmpty() {
       DEFAULT_WELCOME_MESSAGE,
     ]);
   }
+
+  const scopeRow = await db.get("SELECT value FROM app_config WHERE key = 'broadcast_scope'");
+  if (!scopeRow) {
+    await db.run("INSERT INTO app_config (key, value) VALUES ('broadcast_scope', ?)", [
+      DEFAULT_BROADCAST_SCOPE,
+    ]);
+  }
 }
 
 async function reload() {
@@ -114,6 +128,11 @@ async function reload() {
 
   const welcomeRow = await db.get("SELECT value FROM app_config WHERE key = 'welcome_message'");
   welcomeMessage = welcomeRow ? welcomeRow.value : DEFAULT_WELCOME_MESSAGE;
+
+  const scopeRow = await db.get("SELECT value FROM app_config WHERE key = 'broadcast_scope'");
+  broadcastScope = scopeRow && VALID_BROADCAST_SCOPES.includes(scopeRow.value)
+    ? scopeRow.value
+    : DEFAULT_BROADCAST_SCOPE;
 }
 
 async function init() {
@@ -132,6 +151,24 @@ async function setWelcomeMessage(text) {
     `INSERT INTO app_config (key, value) VALUES ('welcome_message', ?)
      ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
     [text]
+  );
+  await reload();
+}
+
+// ---- 關卡公告推播範圍：leader（只推隊長）／ all（推全組成員）----
+
+function getBroadcastScope() {
+  return broadcastScope;
+}
+
+async function setBroadcastScope(scope) {
+  if (!VALID_BROADCAST_SCOPES.includes(scope)) {
+    throw new Error("broadcastScope 必須是 leader 或 all");
+  }
+  await db.run(
+    `INSERT INTO app_config (key, value) VALUES ('broadcast_scope', ?)
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    [scope]
   );
   await reload();
 }
@@ -324,4 +361,6 @@ module.exports = {
   deleteTeamRoute,
   getWelcomeMessage,
   setWelcomeMessage,
+  getBroadcastScope,
+  setBroadcastScope,
 };

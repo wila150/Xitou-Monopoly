@@ -47,6 +47,13 @@
     <section class="panel" id="panel-progress">
       <div class="toolbar">
         <button class="btn secondary" id="refresh-progress">🔄 重新整理</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;margin-left:12px;">
+          關卡公告推播對象：
+          <select id="broadcast-scope">
+            <option value="leader">只推隊長（省則數）</option>
+            <option value="all">推全組成員</option>
+          </select>
+        </label>
         <button class="btn danger" id="reset-game" style="margin-left:auto">⚠️ 重置整場遊戲</button>
       </div>
       <div class="msg" id="progress-msg"></div>
@@ -142,7 +149,7 @@
         <strong>📢 總領隊（不需要是小編）</strong>
         <table style="margin-top:10px;">
           <tbody>
-            <tr><td><code>我是總領隊</code></td><td>自助登記為總領隊</td></tr>
+            <tr><td><code>總領綁定</code></td><td>自助登記為總領隊</td></tr>
             <tr><td><code>群發 訊息內容</code></td><td>對所有目前有隊長的組別廣播一則文字訊息</td></tr>
           </tbody>
         </table>

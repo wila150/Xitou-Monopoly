@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS referees (
   registered_at  TEXT NOT NULL
 );
 
--- 總領隊自己傳「我是總領隊」登記，不需要是 ADMIN_USER_IDS 也能用「群發 訊息」對所有小隊長廣播
+-- 總領隊自己傳「總領綁定」登記，不需要是 ADMIN_USER_IDS 也能用「群發 訊息」對所有小隊長廣播
 CREATE TABLE IF NOT EXISTS broadcasters (
   user_id        TEXT PRIMARY KEY,
   registered_at  TEXT NOT NULL

@@ -32,7 +32,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById(`panel-${btn.dataset.tab}`).classList.add("active");
-    if (btn.dataset.tab === "progress") loadProgress();
+    if (btn.dataset.tab === "progress") { loadProgress(); loadBroadcastScope(); }
     if (btn.dataset.tab === "referees") loadReferees();
     if (btn.dataset.tab === "leaders") loadTeamLeaders();
     if (btn.dataset.tab === "welcome") loadWelcomeMessage();
@@ -338,6 +338,22 @@ document.getElementById("reset-game").addEventListener("click", async () => {
     await api("/api/reset-game", { method: "POST", body: JSON.stringify({ confirm: true }) });
     showMsg(progressMsg, "已重置整場遊戲。", false);
     await loadProgress();
+  } catch (err) {
+    showMsg(progressMsg, err.message, true);
+  }
+});
+
+async function loadBroadcastScope() {
+  const { scope } = await api("/api/broadcast-scope");
+  document.getElementById("broadcast-scope").value = scope;
+}
+document.getElementById("broadcast-scope").addEventListener("change", async (e) => {
+  try {
+    await api("/api/broadcast-scope", {
+      method: "PUT",
+      body: JSON.stringify({ scope: e.target.value }),
+    });
+    showMsg(progressMsg, "已更新關卡公告推播對象。", false);
   } catch (err) {
     showMsg(progressMsg, err.message, true);
   }

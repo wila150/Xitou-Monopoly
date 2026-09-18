@@ -64,7 +64,7 @@ function approveOnlyDenied() {
 
 function broadcastOnlyDenied() {
   return withReply([
-    teamService.textMsg("此指令僅限小編或登記過的總領隊使用，請先輸入「我是總領隊」進行登記。"),
+    teamService.textMsg("此指令僅限小編或登記過的總領隊使用，請先輸入「總領綁定」進行登記。"),
   ]);
 }
 
@@ -119,7 +119,7 @@ async function route(userId, rawText) {
     return withReply(await teamService.registerReferee(userId, checkpointId));
   }
 
-  if (text === "我是總領隊") {
+  if (text === "總領綁定") {
     // 總領隊自助登記：不需要是 ADMIN_USER_IDS，登記後可以用「群發 訊息」對所有小隊長廣播
     return withReply(await teamService.registerBroadcaster(userId));
   }

@@ -2,6 +2,7 @@ const { db, transaction } = require("../db");
 const { getCheckpoint } = require("../config/checkpoints");
 const { getRoute, getAllGroupNos } = require("../config/teamsRoute");
 const { getAdminIds } = require("../config/admins");
+const configStore = require("../config/configStore");
 const { nowIso, formatElapsed, isLate } = require("./timeUtil");
 const event = require("../config/event");
 
@@ -78,6 +79,16 @@ async function getGroupMemberIds(groupNo) {
     [groupNo]
   );
   return rows.map((row) => row.user_id);
+}
+
+// 關卡公告等 groupBroadcast 實際要推給誰：後台可切換「只推隊長」（預設，省 LINE 推播則數）
+// 或「推全組成員」，見 configStore.getBroadcastScope()。
+async function getGroupBroadcastRecipientIds(groupNo) {
+  if (configStore.getBroadcastScope() === "all") {
+    return getGroupMemberIds(groupNo);
+  }
+  const team = await findTeam(db, groupNo);
+  return team && team.leader_user_id ? [team.leader_user_id] : [];
 }
 
 // 12:30 或小編「遊戲結束」之後，系統停止受理新的關卡進度（見 freezeProgress）
@@ -960,5 +971,6 @@ module.exports = {
   findMembership: (userId) => findMembership(db, userId),
   findTeam: (groupNo) => findTeam(db, groupNo),
   getGroupMemberIds,
+  getGroupBroadcastRecipientIds,
   textMsg,
 };

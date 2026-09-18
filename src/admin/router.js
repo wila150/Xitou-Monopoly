@@ -230,6 +230,25 @@ router.put("/api/welcome-message", async (req, res, next) => {
   }
 });
 
+// ---- 關卡公告推播範圍：leader（只推隊長，省則數）／ all（推全組成員）----
+
+router.get("/api/broadcast-scope", (req, res) => {
+  res.json({ scope: configStore.getBroadcastScope() });
+});
+
+router.put("/api/broadcast-scope", async (req, res, next) => {
+  try {
+    const { scope } = req.body || {};
+    if (scope !== "leader" && scope !== "all") {
+      return res.status(400).json({ error: "scope 必須是 leader 或 all" });
+    }
+    await configStore.setBroadcastScope(scope);
+    res.json({ ok: true, scope: configStore.getBroadcastScope() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // 重置整場遊戲：清空所有隊伍報到／進度／紀錄，跟 LINE 指令「重置遊戲 確認」是同一個底層函式。
 // 這是不可逆操作，前端有另外做二次確認，這裡再多要求 body 帶 confirm: true，避免誤觸的請求直接生效。
 router.post("/api/reset-game", async (req, res, next) => {

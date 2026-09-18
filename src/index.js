@@ -86,8 +86,8 @@ async function handleEvent(event) {
     const tasks = [];
     if (reply) tasks.push(lineClient.reply(event.replyToken, reply));
     for (const b of groupBroadcasts) {
-      const memberIds = await teamService.getGroupMemberIds(b.groupNo);
-      tasks.push(lineClient.pushToMany(memberIds, b.messages));
+      const recipientIds = await teamService.getGroupBroadcastRecipientIds(b.groupNo);
+      tasks.push(lineClient.pushToMany(recipientIds, b.messages));
     }
     for (const p of directPushes) {
       tasks.push(lineClient.push(p.to, p.messages));
