@@ -364,19 +364,7 @@ async function runForGroups(req, res, next, { timeField, timeLabel, action }) {
     const results = [];
     for (const groupNo of groups) {
       const result = await action(groupNo, parsed.iso);
-      let notifyFailed = false;
-      try {
-        if (result.groupBroadcast) {
-          const recipientIds = await teamService.getGroupBroadcastRecipientIds(groupNo);
-          await lineClient.pushToMany(recipientIds, result.groupBroadcast.messages);
-        }
-        for (const p of result.directPushes || []) {
-          await lineClient.push(p.to, p.messages);
-        }
-      } catch (err) {
-        console.error(`第 ${groupNo} 組通知推播失敗：`, err);
-        notifyFailed = true;
-      }
+      const notifyFailed = await deliver(groupNo, result);
       results.push({
         groupNo,
         done: !!result.groupBroadcast,
@@ -405,6 +393,93 @@ router.post("/api/finish", (req, res, next) =>
     timeLabel: "到站時間",
     action: (groupNo, iso) => teamService.finishAtB6(groupNo, iso),
   })
+);
+
+// ---- 進度表上的單組操作：通過／退回／取消到站（跟 LINE 指令「通過 X組」「退回 X組」「取消到站 X組」同一個底層函式）----
+
+// 把通知推出去；推播失敗不影響已經記錄的結果，回報 notifyFailed 讓小編知道要手動通知
+async function deliver(groupNo, result) {
+  try {
+    if (result.groupBroadcast) {
+      const recipientIds = await teamService.getGroupBroadcastRecipientIds(groupNo);
+      await lineClient.pushToMany(recipientIds, result.groupBroadcast.messages);
+    }
+    for (const p of result.directPushes || []) {
+      await lineClient.push(p.to, p.messages);
+    }
+    return false;
+  } catch (err) {
+    console.error(`第 ${groupNo} 組通知推播失敗：`, err);
+    return true;
+  }
+}
+
+function teamAction(name, action) {
+  router.post(`/api/teams/:groupNo/${name}`, async (req, res, next) => {
+    try {
+      const groupNo = Number(req.params.groupNo);
+      if (!Number.isInteger(groupNo) || groupNo <= 0) {
+        return res.status(400).json({ error: "組別編號必須是正整數" });
+      }
+      const result = await action(groupNo);
+      const notifyFailed = await deliver(groupNo, result);
+      res.json({
+        ok: true,
+        done: !!result.groupBroadcast,
+        notifyFailed,
+        message: (result.reply || []).map((m) => m.text).join("\n"),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+}
+teamAction("approve", (groupNo) => teamService.approveCheckpoint(groupNo, null)); // 小編權限：任何關卡都能通過
+teamAction("revert", (groupNo) => teamService.revertLastCheckpoint(groupNo));
+teamAction("cancel-finish", (groupNo) => teamService.cancelFinish(groupNo));
+
+// ---- 人員清單與角色指定：小編直接從「傳過訊息給機器人的人」裡挑名字指定關主／總領隊，不用複製 userId ----
+
+router.get("/api/line-users", async (req, res, next) => {
+  try {
+    res.json(await teamService.listLineUsers());
+  } catch (err) {
+    next(err);
+  }
+});
+
+async function roleChange(res, next, change) {
+  try {
+    const result = await change();
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    let notifyFailed = false;
+    try {
+      for (const p of result.pushes || []) await lineClient.push(p.to, p.messages);
+    } catch (err) {
+      console.error("角色異動通知推播失敗：", err);
+      notifyFailed = true;
+    }
+    res.json({ ok: true, message: result.message, notifyFailed });
+  } catch (err) {
+    next(err);
+  }
+}
+
+router.post("/api/referees", (req, res, next) => {
+  const { userId, checkpointId } = req.body || {};
+  if (!userId || !checkpointId) return res.status(400).json({ error: "請選擇人員與關卡" });
+  return roleChange(res, next, () => teamService.assignReferee(String(userId), String(checkpointId).toUpperCase()));
+});
+router.delete("/api/referees/:userId", (req, res, next) =>
+  roleChange(res, next, () => teamService.removeReferee(req.params.userId))
+);
+router.post("/api/broadcasters", (req, res, next) => {
+  const { userId } = req.body || {};
+  if (!userId) return res.status(400).json({ error: "請選擇人員" });
+  return roleChange(res, next, () => teamService.assignBroadcaster(String(userId)));
+});
+router.delete("/api/broadcasters/:userId", (req, res, next) =>
+  roleChange(res, next, () => teamService.removeBroadcaster(req.params.userId))
 );
 
 // ---- 加好友歡迎詞 ----

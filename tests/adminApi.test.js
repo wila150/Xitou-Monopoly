@@ -18,6 +18,8 @@ const configStore = require("../src/config/configStore");
 const commandRouter = require("../src/handlers/commandRouter");
 const teamService = require("../src/services/teamService");
 const lineClient = require("../src/lineClient");
+const lineUserStore = require("../src/config/lineUserStore");
+const { getRoute } = require("../src/config/teamsRoute");
 
 // 不要真的呼叫 LINE：把推播換成記錄用的假函式（後台路由是在呼叫當下才讀 lineClient.push，所以這樣換得掉）
 const pushed = [];
@@ -69,6 +71,7 @@ async function resetGame() {
   await commandRouter.route("Uadmin", "重置遊戲 確認");
   await teamService.resetReferees();
   await teamService.resetBroadcasters();
+  await dbModule.db.run("DELETE FROM line_users");
   pushed.length = 0;
 }
 
@@ -259,4 +262,144 @@ test("後台到站：補登時間驗證，且補登的到站時間決定是否�
   await api("/finish", { method: "POST", body: { groupNos: [1], finishedAt: late } });
   team = await teamService.findTeam(1);
   assert.equal(team.is_late, 1, "補登的到站時間超過 2 小時 → 逾時");
+});
+
+// ---- 進度表單組操作（通過／退回／取消到站） ----
+
+test("後台進度表：通過目前這一關、退回、取消到站，效果與 LINE 指令相同並通知隊伍", async () => {
+  await resetGame();
+  await commandRouter.route("Ul1", "報到 1組");
+  await api("/depart", { method: "POST", body: { groupNos: [1] } });
+
+  // 進度快照帶有目前關卡，給表格與「通過」按鈕確認用
+  let row = (await api("/progress")).data.find((r) => r.groupNo === 1);
+  const firstCp = getRoute(1)[0].checkpointId;
+  assert.equal(row.currentCheckpointId, firstCp);
+  assert.ok(row.currentCheckpointName);
+
+  // 通過：前進一關，推播下一關給隊長
+  pushed.length = 0;
+  const approve = await api("/teams/1/approve", { method: "POST" });
+  assert.equal(approve.status, 200);
+  assert.equal(approve.data.done, true);
+  assert.match(approve.data.message, /已為第 1 組確認/);
+  assert.equal((await teamService.findTeam(1)).current_index, 1);
+  assert.ok(pushed.find((p) => p.to === "Ul1"), "隊伍收到下一關公告");
+
+  // 退回：回到第 0 關
+  const revert = await api("/teams/1/revert", { method: "POST" });
+  assert.equal(revert.data.done, true);
+  assert.equal((await teamService.findTeam(1)).current_index, 0);
+  assert.equal((await api("/teams/1/revert", { method: "POST" })).data.done, false, "沒有進度可退回");
+
+  // 走完 12 關到站，再用後台退回：12 → 11 並取消到站；取消到站則維持 12
+  for (let i = 0; i < 12; i++) await api("/teams/1/approve", { method: "POST" });
+  const done = await api("/teams/1/approve", { method: "POST" });
+  assert.equal(done.data.done, false, "已走完全部關卡不能再通過");
+  await api("/finish", { method: "POST", body: { groupNos: [1] } });
+  row = (await api("/progress")).data.find((r) => r.groupNo === 1);
+  assert.equal(row.status, "FINISHED");
+
+  const cancel = await api("/teams/1/cancel-finish", { method: "POST" });
+  assert.equal(cancel.data.done, true);
+  let team = await teamService.findTeam(1);
+  assert.equal(team.status, "IN_PROGRESS");
+  assert.equal(team.current_index, 12);
+  assert.equal((await api("/teams/1/cancel-finish", { method: "POST" })).data.done, false, "沒有終點確認可取消");
+
+  await api("/finish", { method: "POST", body: { groupNos: [1] } });
+  await api("/teams/1/revert", { method: "POST" });
+  team = await teamService.findTeam(1);
+  assert.equal(team.status, "IN_PROGRESS");
+  assert.equal(team.current_index, 11);
+  assert.equal(team.finish_time, null);
+
+  // 不合法的組別編號
+  assert.equal((await api("/teams/abc/approve", { method: "POST" })).status, 400);
+});
+
+// ---- 人員清單與角色指定 ----
+
+test("LINE 使用者名單：互動過的人會被記下（名稱只補一次），既有的隊伍成員與關主可補登", async () => {
+  await resetGame();
+  assert.equal(await lineUserStore.touch("Ua"), true, "第一次出現：還缺名稱");
+  await lineUserStore.setDisplayName("Ua", "阿明");
+  assert.equal(await lineUserStore.touch("Ua"), false, "已有名稱就不用再問 LINE");
+
+  await commandRouter.route("Ul1", "報到 1組");
+  await commandRouter.route("Ureferee", "我是 B3 關主");
+  await lineUserStore.backfill();
+  const users = (await api("/line-users")).data;
+  const byId = Object.fromEntries(users.map((u) => [u.userId, u]));
+  assert.equal(byId.Ua.displayName, "阿明");
+  assert.equal(byId.Ul1.teamLabel, "第 1 組隊長");
+  assert.equal(byId.Ul1.isTeamMember, true);
+  assert.equal(byId.Ureferee.refereeCheckpointId, "B3");
+  // 補登進來的人還沒有名稱：列在「缺名稱」清單裡，啟動時會在背景補齊；已有名稱的（阿明）不在清單內
+  const missing = await lineUserStore.listMissingNames();
+  assert.ok(missing.includes("Ul1") && missing.includes("Ureferee"));
+  assert.ok(!missing.includes("Ua"));
+});
+
+test("後台指定關主：不需要對方自己傳訊息，指定後對方收到通知與指令說明，可以立刻用「通過」；隊伍成員不能指定；可移除", async () => {
+  await resetGame();
+  await lineUserStore.touch("Ustaff");
+  await lineUserStore.setDisplayName("Ustaff", "小華");
+  await commandRouter.route("Ul1", "報到 1組");
+  await lineUserStore.backfill();
+
+  pushed.length = 0;
+  const ok = await api("/referees", { method: "POST", body: { userId: "Ustaff", checkpointId: "b3" } });
+  assert.equal(ok.status, 200);
+  assert.match(ok.data.message, /B3.*關主/);
+  const notice = pushed.find((p) => p.to === "Ustaff");
+  assert.match(notice.messages[0].text, /小編已指定您擔任.*B3/);
+  assert.match(notice.messages[1].text, /關主可用指令/);
+  assert.equal(await teamService.getRefereeCheckpoint("Ustaff"), "B3");
+
+  const listed = (await api("/referees")).data.find((r) => r.userId === "Ustaff");
+  assert.equal(listed.displayName, "小華");
+  assert.equal(listed.checkpointId, "B3");
+
+  // 指定後直接生效：這個人可以用「進度」
+  assert.match((await commandRouter.route("Ustaff", "進度")).reply[0].text, /B3.*預定來訪順序/);
+
+  // 改指定到別關 = 覆蓋
+  await api("/referees", { method: "POST", body: { userId: "Ustaff", checkpointId: "B4" } });
+  assert.equal(await teamService.getRefereeCheckpoint("Ustaff"), "B4");
+
+  // 錯誤：隊伍成員、不存在的關卡、缺參數
+  const member = await api("/referees", { method: "POST", body: { userId: "Ul1", checkpointId: "B3" } });
+  assert.equal(member.status, 400);
+  assert.match(member.data.error, /已經是第 1 組的成員/);
+  assert.match((await api("/referees", { method: "POST", body: { userId: "Ustaff", checkpointId: "Z9" } })).data.error, /找不到關卡/);
+  assert.equal((await api("/referees", { method: "POST", body: { userId: "Ustaff" } })).status, 400);
+
+  // 移除：對方收到通知、不再是關主；再移除一次會提示
+  pushed.length = 0;
+  const removed = await api("/referees/Ustaff", { method: "DELETE" });
+  assert.equal(removed.status, 200);
+  assert.match(pushed.find((p) => p.to === "Ustaff").messages[0].text, /已取消您的關主身分/);
+  assert.equal(await teamService.getRefereeCheckpoint("Ustaff"), null);
+  assert.equal((await api("/referees/Ustaff", { method: "DELETE" })).status, 400);
+});
+
+test("後台指定／移除總領隊：指定後可以用「推播」與「出發」，移除後失效", async () => {
+  await resetGame();
+  await lineUserStore.touch("Uboss");
+  await commandRouter.route("Ul1", "報到 1組");
+
+  const assign = await api("/broadcasters", { method: "POST", body: { userId: "Uboss" } });
+  assert.equal(assign.status, 200);
+  assert.match(pushed.find((p) => p.to === "Uboss").messages[0].text, /指定您擔任總領隊/);
+  assert.match((await commandRouter.route("Uboss", "推播 隊長 集合")).reply[0].text, /已推播給 1 位小隊長/);
+  assert.match((await commandRouter.route("Uboss", "出發 1組")).reply[0].text, /已將第 1 組標記為出發/);
+
+  assert.equal((await api("/broadcasters", { method: "POST", body: { userId: "Ul1" } })).status, 400, "隊伍成員不能指定");
+  assert.equal((await api("/broadcasters", { method: "POST", body: {} })).status, 400, "沒選人員");
+
+  assert.equal((await api("/broadcasters/Uboss", { method: "DELETE" })).status, 200);
+  assert.match((await commandRouter.route("Uboss", "推播 隊長 集合")).reply[0].text, /僅限小編或登記過的總領隊/);
+  assert.equal((await api("/broadcasters/Uboss", { method: "DELETE" })).status, 400);
+  assert.ok((await api("/broadcasters")).data.every((b) => b.userId !== "Uboss"));
 });

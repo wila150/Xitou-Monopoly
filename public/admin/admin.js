@@ -5,6 +5,10 @@ const VERIFY_TYPES = [
   { value: "referee", label: "關主直接喊過（不接受隊伍輸入）" },
 ];
 
+// 使用者可控的文字（LINE 顯示名稱、緊急聯絡說明）放進 innerHTML 前一律先跳脫，避免有人把名稱取成 HTML 標籤
+const escapeHtml = (t) =>
+  String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
 async function api(path, opts) {
   const res = await fetch(`/admin${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -308,6 +312,10 @@ document.getElementById("add-group").addEventListener("click", async () => {
 
 // ---- 即時進度 ----
 async function loadProgress() {
+  // 自動更新會重畫整張表，先記下勾選的組別，重畫後還原，不然勾到一半就被清掉
+  const checkedBefore = new Set(
+    [...document.querySelectorAll(".depart-check:checked, .finish-check:checked")].map((c) => c.value)
+  );
   const rows = await api("/api/progress");
   document.getElementById("progress-body").innerHTML = rows
     .map((r) => {
@@ -319,21 +327,33 @@ async function loadProgress() {
       }[r.status] || r.status;
       const bonus = r.bonusPoints || 0;
       const canDepart = r.status === "CHECKED_IN";
-      const canFinish = r.status === "IN_PROGRESS";
+      const inProgress = r.status === "IN_PROGRESS";
+      const finished = r.status === "FINISHED";
+      const canApprove = inProgress && !!r.currentCheckpointId;
+      const canRevert = (inProgress && r.currentIndex > 0) || finished;
+      const currentCp = r.currentCheckpointId
+        ? `${escapeHtml(r.currentCheckpointId)} ${escapeHtml(r.currentCheckpointName)}`
+        : inProgress ? "已走完全部關卡" : "-";
+      const checkClass = canDepart ? "depart-check" : "finish-check";
+      const checked = checkedBefore.has(String(r.groupNo)) ? "checked" : "";
       return `
         <tr>
-          <td>${canDepart || canFinish ? `<input type="checkbox" class="${canDepart ? "depart-check" : "finish-check"}" value="${r.groupNo}" />` : ""}</td>
+          <td>${canDepart || inProgress ? `<input type="checkbox" class="${checkClass}" value="${r.groupNo}" ${checked} />` : ""}</td>
           <td>第 ${r.groupNo} 組</td>
           <td><span class="status-tag status-${r.status}">${statusLabel}</span></td>
+          <td>${currentCp}</td>
           <td>${r.startTime ? formatClock(r.startTime) : "-"}</td>
           <td>${r.finishTime ? formatClock(r.finishTime) : "-"}</td>
           <td>${r.currentIndex != null ? `${r.currentIndex}/${r.totalCheckpoints}` : "-"}</td>
           <td>${r.elapsed || "-"}</td>
           <td>${r.isLate === true ? "⚠️ 逾時" : r.isLate === false ? "準時" : "-"}</td>
           <td>${bonus !== 0 ? (bonus > 0 ? `+${bonus}` : bonus) : "-"}</td>
-          <td>
+          <td style="white-space:nowrap;">
             ${canDepart ? `<button class="btn depart-one" data-group="${r.groupNo}">🚩 出發</button>` : ""}
-            ${canFinish ? `<button class="btn finish-one" data-group="${r.groupNo}">🏁 到站</button>` : ""}
+            ${inProgress ? `<button class="btn finish-one" data-group="${r.groupNo}">🏁 到站</button>` : ""}
+            ${canApprove ? `<button class="btn team-op" data-op="approve" data-group="${r.groupNo}">✅ 通過</button>` : ""}
+            ${canRevert ? `<button class="btn secondary team-op" data-op="revert" data-group="${r.groupNo}">↩ 退回</button>` : ""}
+            ${finished ? `<button class="btn secondary team-op" data-op="cancel-finish" data-group="${r.groupNo}">取消到站</button>` : ""}
           </td>
         </tr>
       `;
@@ -344,6 +364,9 @@ async function loadProgress() {
   });
   document.querySelectorAll(".finish-one").forEach((btn) => {
     btn.addEventListener("click", () => finishGroups([Number(btn.dataset.group)]));
+  });
+  document.querySelectorAll(".team-op").forEach((btn) => {
+    btn.addEventListener("click", () => teamOperation(Number(btn.dataset.group), btn.dataset.op));
   });
 }
 document.getElementById("refresh-progress").addEventListener("click", loadProgress);
@@ -411,6 +434,36 @@ const checkedGroups = (selector) => [...document.querySelectorAll(selector + ":c
 document.getElementById("depart-selected").addEventListener("click", () => departGroups(checkedGroups(".depart-check")));
 document.getElementById("finish-selected").addEventListener("click", () => finishGroups(checkedGroups(".finish-check")));
 
+// 單組操作：通過／退回／取消到站，跟 LINE 指令效果相同（見 src/admin/router.js 的 teamAction）
+const TEAM_OPERATIONS = {
+  approve: { label: "通過目前這一關", warning: "會放行該組目前這一關並推播下一關給隊伍，等同 LINE 輸入「通過 X組」。" },
+  revert: { label: "退回一關", warning: "完成關卡數 -1，該關重新視為未完成；已到站的組別會一併取消終點確認、清掉結束時間與逾時。" },
+  "cancel-finish": { label: "取消到站", warning: "只取消終點確認，完成關卡數不變，該組恢復闖關中、計時繼續累加。" },
+};
+async function teamOperation(groupNo, op) {
+  if (groupActionRunning) return;
+  const { label, warning } = TEAM_OPERATIONS[op];
+  if (!confirm(`確定要對第 ${groupNo} 組執行「${label}」嗎？\n\n${warning}`)) return;
+  groupActionRunning = true;
+  try {
+    const res = await api(`/api/teams/${groupNo}/${op}`, { method: "POST" });
+    const note = res.notifyFailed ? " ⚠️ 已記錄，但 LINE 通知沒送出，請到 LINE 手動通知。" : "";
+    showMsg(progressMsg, res.message + note, !res.done || res.notifyFailed);
+    await loadProgress();
+  } catch (err) {
+    showMsg(progressMsg, err.message, true);
+  } finally {
+    groupActionRunning = false;
+  }
+}
+
+// 即時進度停在畫面上時每 10 秒自動更新（操作進行中或視窗在背景時不更新）
+setInterval(() => {
+  if (document.hidden || groupActionRunning) return;
+  if (!document.getElementById("panel-progress").classList.contains("active")) return;
+  loadProgress().catch(() => {});
+}, 10000);
+
 const progressMsg = document.getElementById("progress-msg");
 document.getElementById("reset-game").addEventListener("click", async () => {
   if (!confirm("⚠️ 這會清空所有隊伍的報到、進度與紀錄，且無法復原，確定要重置整場遊戲嗎？")) return;
@@ -445,15 +498,77 @@ document.getElementById("broadcast-scope").addEventListener("change", async (e) 
 });
 
 // ---- 關主名單 ----
+// 傳過訊息給官方帳號的人 → 下拉選單選項。已在隊伍裡的人不能指定（跟自助登記同樣規則），並標出現有身分方便辨識
+function lineUserLabel(u) {
+  const badges = [
+    u.teamLabel,
+    u.refereeCheckpointId ? `${u.refereeCheckpointId} 關主` : null,
+    u.isBroadcaster ? "總領隊" : null,
+    u.isAdmin ? "小編" : null,
+  ].filter(Boolean);
+  return `${u.displayName || "（未取得名稱）"} …${u.userIdSuffix}${badges.length ? `［${badges.join("、")}］` : ""}`;
+}
+
+async function fillUserSelect(selectId) {
+  const select = document.getElementById(selectId);
+  const previous = select.value;
+  const users = await api("/api/line-users");
+  select.innerHTML =
+    `<option value="">— 選擇人員（${users.length} 位）—</option>` +
+    users
+      .map((u) => `<option value="${escapeHtml(u.userId)}" ${u.isTeamMember ? "disabled" : ""}>${escapeHtml(lineUserLabel(u))}</option>`)
+      .join("");
+  if (previous) select.value = previous;
+}
+
+let checkpointOptionsHtml = "";
+async function fillCheckpointSelect() {
+  const cps = await api("/api/checkpoints");
+  checkpointOptionsHtml = cps.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.id)} ${escapeHtml(c.name)}</option>`).join("");
+  document.getElementById("assign-referee-cp").innerHTML = checkpointOptionsHtml;
+}
+
+const refereesMsg = document.getElementById("referees-msg");
 async function loadReferees() {
   const rows = await api("/api/referees");
   document.getElementById("referees-body").innerHTML = rows
     .map(
-      (r) => `<tr><td>${r.checkpointId}</td><td>...${r.userIdSuffix}</td><td>${new Date(r.registeredAt).toLocaleString("zh-TW")}</td></tr>`
+      (r) => `<tr>
+        <td>${escapeHtml(r.checkpointId)}</td>
+        <td>${escapeHtml(r.displayName || "-")}</td>
+        <td>...${escapeHtml(r.userIdSuffix)}</td>
+        <td>${new Date(r.registeredAt).toLocaleString("zh-TW")}</td>
+        <td><button class="btn danger remove-referee" data-user="${escapeHtml(r.userId)}">移除</button></td>
+      </tr>`
     )
-    .join("");
+    .join("") || `<tr><td colspan="5" style="color:#888;">目前沒有人登記為關主</td></tr>`;
+  document.querySelectorAll(".remove-referee").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("確定取消這位關主的身分嗎？對方會收到 LINE 通知。")) return;
+      try {
+        const res = await api(`/api/referees/${encodeURIComponent(btn.dataset.user)}`, { method: "DELETE" });
+        showMsg(refereesMsg, res.message + (res.notifyFailed ? "（LINE 通知沒送出）" : ""), res.notifyFailed);
+        await loadReferees();
+      } catch (err) {
+        showMsg(refereesMsg, err.message, true);
+      }
+    });
+  });
+  await Promise.all([fillUserSelect("assign-referee-user"), fillCheckpointSelect()]).catch(() => {});
 }
 document.getElementById("refresh-referees").addEventListener("click", loadReferees);
+document.getElementById("assign-referee").addEventListener("click", async () => {
+  const userId = document.getElementById("assign-referee-user").value;
+  const checkpointId = document.getElementById("assign-referee-cp").value;
+  if (!userId) return showMsg(refereesMsg, "請先選擇要指定的人員。", true);
+  try {
+    const res = await api("/api/referees", { method: "POST", body: JSON.stringify({ userId, checkpointId }) });
+    showMsg(refereesMsg, res.message + (res.notifyFailed ? "（⚠️ LINE 通知沒送出，請當面告知對方）" : "，已通知對方。"), res.notifyFailed);
+    await loadReferees();
+  } catch (err) {
+    showMsg(refereesMsg, err.message, true);
+  }
+});
 
 // ---- 小隊長名單 ----
 const STATUS_LABELS = {
@@ -470,6 +585,7 @@ async function loadTeamLeaders() {
       (r) => `
         <tr>
           <td>第 ${r.groupNo} 組</td>
+          <td>${escapeHtml(r.displayName || "-")}</td>
           <td>...${r.userIdSuffix}</td>
           <td><span class="status-tag status-${r.status}">${STATUS_LABELS[r.status] || r.status}</span></td>
           <td>${r.joinedAt ? new Date(r.joinedAt).toLocaleString("zh-TW") : "-"}</td>
@@ -481,20 +597,48 @@ async function loadTeamLeaders() {
 document.getElementById("refresh-leaders").addEventListener("click", loadTeamLeaders);
 
 // ---- 總領隊名單 ----
+const broadcastersMsg = document.getElementById("broadcasters-msg");
 async function loadBroadcasters() {
   const rows = await api("/api/broadcasters");
   document.getElementById("broadcasters-body").innerHTML = rows
     .map(
-      (r) => `<tr><td>...${r.userIdSuffix}</td><td>${new Date(r.registeredAt).toLocaleString("zh-TW")}</td></tr>`
+      (r) => `<tr>
+        <td>${escapeHtml(r.displayName || "-")}</td>
+        <td>...${escapeHtml(r.userIdSuffix)}</td>
+        <td>${new Date(r.registeredAt).toLocaleString("zh-TW")}</td>
+        <td><button class="btn danger remove-broadcaster" data-user="${escapeHtml(r.userId)}">移除</button></td>
+      </tr>`
     )
-    .join("") || `<tr><td colspan="2" style="color:#888;">目前沒有人登記為總領隊</td></tr>`;
+    .join("") || `<tr><td colspan="4" style="color:#888;">目前沒有人登記為總領隊</td></tr>`;
+  document.querySelectorAll(".remove-broadcaster").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("確定取消這位總領隊的身分嗎？對方會收到 LINE 通知。")) return;
+      try {
+        const res = await api(`/api/broadcasters/${encodeURIComponent(btn.dataset.user)}`, { method: "DELETE" });
+        showMsg(broadcastersMsg, res.message + (res.notifyFailed ? "（LINE 通知沒送出）" : ""), res.notifyFailed);
+        await loadBroadcasters();
+      } catch (err) {
+        showMsg(broadcastersMsg, err.message, true);
+      }
+    });
+  });
+  await fillUserSelect("assign-broadcaster-user").catch(() => {});
 }
 document.getElementById("refresh-broadcasters").addEventListener("click", loadBroadcasters);
+document.getElementById("assign-broadcaster").addEventListener("click", async () => {
+  const userId = document.getElementById("assign-broadcaster-user").value;
+  if (!userId) return showMsg(broadcastersMsg, "請先選擇要指定的人員。", true);
+  try {
+    const res = await api("/api/broadcasters", { method: "POST", body: JSON.stringify({ userId }) });
+    showMsg(broadcastersMsg, res.message + (res.notifyFailed ? "（⚠️ LINE 通知沒送出，請當面告知對方）" : "，已通知對方。"), res.notifyFailed);
+    await loadBroadcasters();
+  } catch (err) {
+    showMsg(broadcastersMsg, err.message, true);
+  }
+});
 
 // ---- 緊急聯絡 ----
 const emergenciesMsg = document.getElementById("emergencies-msg");
-const escapeHtml = (t) =>
-  String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function emergencyCardHtml(r) {
   const open = r.status === "OPEN";

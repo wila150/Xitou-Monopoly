@@ -10,6 +10,7 @@ const scheduler = require("./scheduler");
 const db = require("./db");
 const configStore = require("./config/configStore");
 const imageStore = require("./config/imageStore");
+const lineUserStore = require("./config/lineUserStore");
 const adminRouter = require("./admin/router");
 
 const app = express();
@@ -69,11 +70,38 @@ app.use("/webhook", (err, req, res, next) => {
   res.status(500).end();
 });
 
+// 記下互動過的人（顯示名稱只在還沒有時才問 LINE），背景執行，失敗只記 log，不影響任何回覆
+function recordLineUser(userId) {
+  lineUserStore
+    .touch(userId)
+    .then(async (needsName) => {
+      if (!needsName) return;
+      const name = await lineClient.getDisplayName(userId);
+      if (name) await lineUserStore.setDisplayName(userId, name);
+    })
+    .catch((err) => console.error("記錄 LINE 使用者失敗（不影響回覆）：", err.message || err));
+}
+
+// 啟動時把既有的隊伍成員／關主／總領隊補進名單，並在背景補齊缺的顯示名稱
+async function backfillLineUsers() {
+  await lineUserStore.backfill();
+  for (const userId of await lineUserStore.listMissingNames()) {
+    try {
+      const name = await lineClient.getDisplayName(userId);
+      if (name) await lineUserStore.setDisplayName(userId, name);
+    } catch {
+      // 查不到（例如對方已封鎖）就留空，之後對方傳訊息時會再補
+    }
+  }
+}
+
 // 加好友時的歡迎訊息：LINE 官方帳號後台內建的「加入好友歡迎訊息」功能請關閉（見 README），
 // 統一由這裡的 webhook 發送，才會跟報到指令實際支援的格式（見 commandRouter.js 的 CHECKIN_RE）保持一致。
 // 實際文字內容存在資料庫、可在後台網頁編輯（見 configStore.getWelcomeMessage／setWelcomeMessage）。
 async function handleEvent(event) {
   try {
+    if (event.source && event.source.userId) recordLineUser(event.source.userId);
+
     if (event.type === "follow") {
       console.log(`收到加入好友事件：userId=${event.source && event.source.userId}`);
       if (event.replyToken) {
@@ -156,6 +184,7 @@ db.init()
     app.listen(PORT, () => {
       console.log(`LINE 闖關系統伺服器已啟動，監聽埠 ${PORT}`);
       scheduler.start();
+      backfillLineUsers().catch((err) => console.error("補登 LINE 使用者名單失敗：", err));
     });
   })
   .catch((err) => {

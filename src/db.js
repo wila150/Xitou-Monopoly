@@ -164,6 +164,16 @@ CREATE TABLE IF NOT EXISTS pending_submissions (
   submitted_at   TEXT NOT NULL
 );
 
+-- 傳過訊息（或加好友）給官方帳號的人：讓後台可以直接「挑名字」指定關主／總領隊，不用複製 userId。
+-- LINE 沒有「列出所有好友」的公開 API，所以只能記下「有跟機器人互動過」的人（見 src/config/lineUserStore.js）。
+-- 這是聯絡人名單，不是遊戲進度，「重置遊戲」不會清掉。
+CREATE TABLE IF NOT EXISTS line_users (
+  user_id        TEXT PRIMARY KEY,
+  display_name   TEXT,
+  first_seen_at  TEXT NOT NULL,
+  last_seen_at   TEXT NOT NULL
+);
+
 -- 緊急聯絡：任何人（隊員、關主、總領隊、還沒報到的帳號）傳「緊急聯絡」，系統立刻推播給小編，
 -- 並在這裡留一筆紀錄，小編按「我來處理」或後台按「已處理」後會通知回報者。
 -- 屬於遊戲進行中的紀錄，「重置遊戲」會一併清空。

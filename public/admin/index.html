@@ -85,9 +85,12 @@
           按錯的話，LINE 輸入「取消到站 X組」（只取消到站）或「退回 X組」（退一關）更正。
         </span>
       </div>
+      <p style="font-size:12px;color:#888;margin:6px 0;">
+        此頁每 10 秒自動更新。操作欄：🚩 出發／🏁 到站／✅ 通過（放行目前這一關，等同 LINE「通過 X組」）／↩ 退回（退一關，已到站的一併取消到站）／取消到站（只取消終點確認，關卡數不變）。
+      </p>
       <table>
         <thead>
-          <tr><th></th><th>組別</th><th>狀態</th><th>出發時間</th><th>到站時間</th><th>進度</th><th>經過時間</th><th>逾時</th><th>加分</th><th>操作</th></tr>
+          <tr><th></th><th>組別</th><th>狀態</th><th>目前關卡</th><th>出發時間</th><th>到站時間</th><th>進度</th><th>經過時間</th><th>逾時</th><th>加分</th><th>操作</th></tr>
         </thead>
         <tbody id="progress-body"></tbody>
       </table>
@@ -98,8 +101,21 @@
       <div class="toolbar">
         <button class="btn secondary" id="refresh-referees">🔄 重新整理</button>
       </div>
+      <div class="msg" id="referees-msg"></div>
+      <div class="route-card">
+        <strong>📌 指定關主</strong>
+        <div class="toolbar" style="margin:10px 0 4px;align-items:center;">
+          <select id="assign-referee-user" style="min-width:260px;"></select>
+          <select id="assign-referee-cp"></select>
+          <button class="btn" id="assign-referee">指定為關主</button>
+        </div>
+        <p style="font-size:12px;color:#888;margin:0;">
+          名單是「傳過訊息給官方帳號的人」（含已報到的隊伍成員、關主、總領隊），最近有互動的排前面。對方還沒出現的話，請他傳任何一句話給官方帳號（例如「我的ID」）再按重新整理。
+          已在隊伍裡的人不能指定。被指定的人會收到 LINE 通知與該身分的指令說明；也可以直接按名單旁的「移除」取消。
+        </p>
+      </div>
       <table>
-        <thead><tr><th>關卡</th><th>LINE 帳號（末 6 碼）</th><th>登記時間</th></tr></thead>
+        <thead><tr><th>關卡</th><th>名稱</th><th>LINE 帳號（末 6 碼）</th><th>登記時間</th><th>操作</th></tr></thead>
         <tbody id="referees-body"></tbody>
       </table>
     </section>
@@ -110,7 +126,7 @@
         <button class="btn secondary" id="refresh-leaders">🔄 重新整理</button>
       </div>
       <table>
-        <thead><tr><th>組別</th><th>LINE 帳號（末 6 碼）</th><th>狀態</th><th>報到時間</th></tr></thead>
+        <thead><tr><th>組別</th><th>名稱</th><th>LINE 帳號（末 6 碼）</th><th>狀態</th><th>報到時間</th></tr></thead>
         <tbody id="leaders-body"></tbody>
       </table>
     </section>
@@ -120,11 +136,19 @@
       <div class="toolbar">
         <button class="btn secondary" id="refresh-broadcasters">🔄 重新整理</button>
       </div>
+      <div class="msg" id="broadcasters-msg"></div>
       <p style="font-size:13px;color:#666;">
-        自助登記為總領隊的帳號（輸入「總領綁定」登記）。這些人跟所有小編都能用「推播」對隊長、關主、所有人發送訊息。
+        總領隊可以自己輸入「總領綁定」登記，也可以由小編在這裡直接指定。這些人跟所有小編都能用「推播」對隊長、關主、所有人發送訊息，也能替隊伍按「出發」。
       </p>
+      <div class="route-card">
+        <strong>📌 指定總領隊</strong>
+        <div class="toolbar" style="margin:10px 0 0;align-items:center;">
+          <select id="assign-broadcaster-user" style="min-width:260px;"></select>
+          <button class="btn" id="assign-broadcaster">指定為總領隊</button>
+        </div>
+      </div>
       <table>
-        <thead><tr><th>LINE 帳號（末 6 碼）</th><th>登記時間</th></tr></thead>
+        <thead><tr><th>名稱</th><th>LINE 帳號（末 6 碼）</th><th>登記時間</th><th>操作</th></tr></thead>
         <tbody id="broadcasters-body"></tbody>
       </table>
     </section>
@@ -244,7 +268,7 @@
           <tbody>
             <tr><td><code>通過 X組</code></td><td>對任何關卡都能直接喊過，不受關主登記限制</td></tr>
             <tr><td><code>退回 X組</code></td><td>每次都真的退一關（完成關卡數 -1）。已到站的組別會一併取消終點確認、清掉結束時間與逾時標記，例如 12/12 → 11/12，排行榜與查詢同步更新</td></tr>
-            <tr><td><code>取消到站 X組</code></td><td>只取消誤按的終點確認，完成關卡數不變（12/12 仍是 12/12）</td></tr>
+            <tr><td><code>取消到站 X組</code></td><td>只取消誤按的終點確認，完成關卡數不變（12/12 仍是 12/12）。後台進度表每列也有對應的「✅ 通過」「↩ 退回」「取消到站」按鈕</td></tr>
             <tr><td><code>解除綁定 X組</code></td><td>清空單一組別的綁定與報到狀態</td></tr>
             <tr><td><code>確認換隊長 X組</code></td><td>核准組員的換隊長申請</td></tr>
             <tr><td><code>加分 X組 N</code>（可加理由）</td><td>任意時機、任意理由加分／扣分（N 可負數），影響排行榜排序</td></tr>

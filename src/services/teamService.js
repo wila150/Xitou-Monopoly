@@ -629,21 +629,25 @@ async function approveSubmissionById(id) {
 // ---- 三之五、關主自助登記：「我是 B3 關主」----
 // 防呆：已經報到綁定某一組的人不能再登記成關主，避免隊伍自己登記自己那關的關主幫自己過關。
 
-async function registerReferee(userId, checkpointId) {
+// 「已經是隊伍成員」擋下登記時的說法：自助登記是對本人說話（您），後台指定是對小編說話（這個帳號）
+function memberBlockedMessage(membership, roleLabel, self) {
+  const subject = self ? "您" : "這個帳號";
+  const remedy = self ? "請聯繫小編協助「解除綁定」後再重新登記" : "請先「解除綁定」後再登記";
+  return `⚠️ ${subject}已經是第 ${membership.group_no} 組的成員，無法同時登記為${roleLabel}。若這是誤觸的隊伍報到，${remedy}。`;
+}
+
+// 登記關主（自助登記與後台指定共用）：成功回傳 { ok: true, cp }，不能登記回傳 { ok: false, error: 訊息 }
+async function tryRegisterReferee(userId, checkpointId, { self = false } = {}) {
   let cp;
   try {
     cp = getCheckpoint(checkpointId);
   } catch {
-    return [textMsg(`⚠️ 找不到關卡代號「${checkpointId}」，請確認輸入是否正確。`)];
+    return { ok: false, error: `⚠️ 找不到關卡代號「${checkpointId}」，請確認輸入是否正確。` };
   }
 
   const membership = await findMembership(db, userId);
   if (membership) {
-    return [
-      textMsg(
-        `⚠️ 您已經是第 ${membership.group_no} 組的成員，無法同時登記為關主。若這是誤觸的隊伍報到，請聯繫小編協助「解除綁定」後再重新登記。`
-      ),
-    ];
+    return { ok: false, error: memberBlockedMessage(membership, "關主", self) };
   }
 
   await db.run(
@@ -651,13 +655,47 @@ async function registerReferee(userId, checkpointId) {
      ON CONFLICT (user_id) DO UPDATE SET checkpoint_id = excluded.checkpoint_id, registered_at = excluded.registered_at`,
     [userId, checkpointId, nowIso()]
   );
+  return { ok: true, cp };
+}
 
+async function registerReferee(userId, checkpointId) {
+  const result = await tryRegisterReferee(userId, checkpointId, { self: true });
+  if (!result.ok) return [textMsg(result.error)];
+  const { cp } = result;
   return [
     textMsg(
       `✅ 已登記為「${cp.name}」（${cp.id}）的關主。之後隊伍在這一關完成任務後，直接輸入「通過 X組」即可為該組解鎖下一關。`
     ),
     refereeHelpMsg(checkpointId),
   ];
+}
+
+// 後台指定關主：不需要對方自己傳訊息。成功會回傳要推播給對方的通知（含指令說明）。
+async function assignReferee(userId, checkpointId) {
+  const result = await tryRegisterReferee(userId, checkpointId);
+  if (!result.ok) return { ok: false, error: result.error.replace(/^⚠️ /, "") };
+  const { cp } = result;
+  return {
+    ok: true,
+    message: `已指定為「${cp.name}」（${cp.id}）的關主`,
+    pushes: [
+      {
+        to: userId,
+        messages: [textMsg(`📌 小編已指定您擔任「${cp.name}」（${cp.id}）的關主。`), refereeHelpMsg(checkpointId)],
+      },
+    ],
+  };
+}
+
+async function removeReferee(userId) {
+  const row = await db.get("SELECT checkpoint_id FROM referees WHERE user_id = ?", [userId]);
+  if (!row) return { ok: false, error: "這個帳號目前不是關主" };
+  await db.run("DELETE FROM referees WHERE user_id = ?", [userId]);
+  return {
+    ok: true,
+    message: `已取消 ${row.checkpoint_id} 關主`,
+    pushes: [{ to: userId, messages: [textMsg(`ℹ️ 小編已取消您的關主身分（${row.checkpoint_id}）。如有疑問請聯繫小編。`)] }],
+  };
 }
 
 // 用關卡代號（例如 B3）或關卡名稱（例如 救救菜英文）找關卡，代號不分大小寫，找不到回傳 null
@@ -699,9 +737,13 @@ async function resetReferees() {
 // 給後台網頁看目前有哪些人登記成哪一關的關主（不含 userId 全碼，只顯示末 6 碼方便辨識，保留一點隱私）
 async function listReferees() {
   const rows = await db.all(
-    "SELECT user_id, checkpoint_id, registered_at FROM referees ORDER BY checkpoint_id"
+    `SELECT r.user_id, r.checkpoint_id, r.registered_at, u.display_name
+     FROM referees r LEFT JOIN line_users u ON u.user_id = r.user_id
+     ORDER BY r.checkpoint_id`
   );
   return rows.map((r) => ({
+    userId: r.user_id,
+    displayName: r.display_name,
     userIdSuffix: r.user_id.slice(-6),
     checkpointId: r.checkpoint_id,
     registeredAt: r.registered_at,
@@ -711,14 +753,16 @@ async function listReferees() {
 // 給後台網頁看目前每組的小隊長是誰（不含 userId 全碼，只顯示末 6 碼方便辨識，保留一點隱私）
 async function listTeamLeaders() {
   const rows = await db.all(
-    `SELECT t.group_no, t.leader_user_id, t.status, tm.joined_at
+    `SELECT t.group_no, t.leader_user_id, t.status, tm.joined_at, u.display_name
      FROM teams t
      LEFT JOIN team_members tm ON tm.user_id = t.leader_user_id
+     LEFT JOIN line_users u ON u.user_id = t.leader_user_id
      WHERE t.leader_user_id IS NOT NULL
      ORDER BY t.group_no`
   );
   return rows.map((r) => ({
     groupNo: r.group_no,
+    displayName: r.display_name,
     userIdSuffix: r.leader_user_id.slice(-6),
     status: r.status,
     joinedAt: r.joined_at,
@@ -727,26 +771,45 @@ async function listTeamLeaders() {
 
 // ---- 三之五、總領隊自助登記與推播（不需要是 ADMIN_USER_IDS，也能對隊長／關主／所有人推播）----
 
-async function registerBroadcaster(userId) {
+async function tryRegisterBroadcaster(userId, { self = false } = {}) {
   const membership = await findMembership(db, userId);
   if (membership) {
-    return [
-      textMsg(
-        `⚠️ 您已經是第 ${membership.group_no} 組的成員，無法同時登記為總領隊。若這是誤觸的隊伍報到，請聯繫小編協助「解除綁定」後再重新登記。`
-      ),
-    ];
+    return { ok: false, error: memberBlockedMessage(membership, "總領隊", self) };
   }
-
   await db.run(
     `INSERT INTO broadcasters (user_id, registered_at) VALUES (?, ?)
      ON CONFLICT (user_id) DO UPDATE SET registered_at = excluded.registered_at`,
     [userId, nowIso()]
   );
+  return { ok: true };
+}
 
-  return [
-    textMsg("✅ 已登記為總領隊。"),
-    broadcasterHelpMsg(),
-  ];
+async function registerBroadcaster(userId) {
+  const result = await tryRegisterBroadcaster(userId, { self: true });
+  if (!result.ok) return [textMsg(result.error)];
+  return [textMsg("✅ 已登記為總領隊。"), broadcasterHelpMsg()];
+}
+
+// 後台指定總領隊
+async function assignBroadcaster(userId) {
+  const result = await tryRegisterBroadcaster(userId);
+  if (!result.ok) return { ok: false, error: result.error.replace(/^⚠️ /, "") };
+  return {
+    ok: true,
+    message: "已指定為總領隊",
+    pushes: [{ to: userId, messages: [textMsg("📌 小編已指定您擔任總領隊。"), broadcasterHelpMsg()] }],
+  };
+}
+
+async function removeBroadcaster(userId) {
+  const row = await db.get("SELECT user_id FROM broadcasters WHERE user_id = ?", [userId]);
+  if (!row) return { ok: false, error: "這個帳號目前不是總領隊" };
+  await db.run("DELETE FROM broadcasters WHERE user_id = ?", [userId]);
+  return {
+    ok: true,
+    message: "已取消總領隊",
+    pushes: [{ to: userId, messages: [textMsg("ℹ️ 小編已取消您的總領隊身分。如有疑問請聯繫小編。")] }],
+  };
 }
 
 async function isBroadcaster(userId) {
@@ -761,11 +824,40 @@ async function resetBroadcasters() {
 }
 
 // 給後台網頁看目前有哪些人登記成總領隊（不含 userId 全碼，只顯示末 6 碼方便辨識，保留一點隱私）
+// 後台「指定關主／總領隊」用的人員清單：最近有互動的排前面，並標出每個人目前的身分，避免指定到已在隊伍裡的人
+async function listLineUsers() {
+  const rows = await db.all(
+    `SELECT u.user_id, u.display_name, u.last_seen_at,
+            tm.group_no, tm.role, r.checkpoint_id, (b.user_id IS NOT NULL) AS is_broadcaster
+     FROM line_users u
+     LEFT JOIN team_members tm ON tm.user_id = u.user_id
+     LEFT JOIN referees r ON r.user_id = u.user_id
+     LEFT JOIN broadcasters b ON b.user_id = u.user_id
+     ORDER BY u.last_seen_at DESC`
+  );
+  const adminIds = getAdminIds();
+  return rows.map((r) => ({
+    userId: r.user_id,
+    displayName: r.display_name,
+    userIdSuffix: r.user_id.slice(-6),
+    lastSeenAt: r.last_seen_at,
+    teamLabel: r.group_no ? `第 ${r.group_no} 組${r.role === "LEADER" ? "隊長" : "組員"}` : null,
+    isTeamMember: !!r.group_no,
+    refereeCheckpointId: r.checkpoint_id || null,
+    isBroadcaster: !!r.is_broadcaster,
+    isAdmin: adminIds.includes(r.user_id),
+  }));
+}
+
 async function listBroadcasters() {
   const rows = await db.all(
-    "SELECT user_id, registered_at FROM broadcasters ORDER BY registered_at"
+    `SELECT b.user_id, b.registered_at, u.display_name
+     FROM broadcasters b LEFT JOIN line_users u ON u.user_id = b.user_id
+     ORDER BY b.registered_at`
   );
   return rows.map((r) => ({
+    userId: r.user_id,
+    displayName: r.display_name,
     userIdSuffix: r.user_id.slice(-6),
     registeredAt: r.registered_at,
   }));
@@ -1154,6 +1246,14 @@ function taipeiTime(iso) {
   });
 }
 
+function checkpointNameOf(checkpointId) {
+  try {
+    return getCheckpoint(checkpointId).name;
+  } catch {
+    return checkpointId;
+  }
+}
+
 function checkpointLabelOf(checkpointId) {
   try {
     return `${checkpointId}「${getCheckpoint(checkpointId).name}」`;
@@ -1539,7 +1639,10 @@ async function getProgressSnapshot() {
       };
     }
     if (team.status === "IN_PROGRESS") {
-      return { ...base, elapsed: formatElapsed(team.start_time, nowIso()) };
+      // 目前這一關（給後台進度表顯示與「通過」按鈕確認用）；已走完全部關卡則沒有
+      const step = getRoute(groupNo)[team.current_index];
+      const current = step ? { currentCheckpointId: step.checkpointId, currentCheckpointName: checkpointNameOf(step.checkpointId) } : {};
+      return { ...base, ...current, elapsed: formatElapsed(team.start_time, nowIso()) };
     }
     return base; // CHECKED_IN
   });
@@ -1633,6 +1736,11 @@ module.exports = {
   listPendingSubmissions,
   approveSubmissionById,
   registerReferee,
+  assignReferee,
+  removeReferee,
+  assignBroadcaster,
+  removeBroadcaster,
+  listLineUsers,
   usageGuideFor,
   tryRefereeBareRegistration,
   getRefereeCheckpoint,
