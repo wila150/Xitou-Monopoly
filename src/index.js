@@ -59,8 +59,10 @@ const WELCOME_MESSAGE =
 async function handleEvent(event) {
   try {
     if (event.type === "follow") {
+      console.log(`收到加入好友事件：userId=${event.source && event.source.userId}`);
       if (event.replyToken) {
         await lineClient.reply(event.replyToken, [teamService.textMsg(WELCOME_MESSAGE)]);
+        console.log("歡迎訊息已送出");
       }
       return;
     }
