@@ -142,6 +142,61 @@ async function isProgressFrozen(exec) {
   return !!row;
 }
 
+// ---- 登記／報到成功後主動附上「這個身分可以用的指令」，只列該身分自己的，不洩漏小編專用指令 ----
+
+function teamHelpMsg(role) {
+  const lines = [
+    "📖 隊伍可用指令",
+    "• 目前關卡：查詢這一關的地點、玩法與過關方式",
+    "• 闖關進度：查詢已完成關卡數與累計耗時",
+    "• 排行榜：小編開放後才能查詢",
+    "• 使用說明：完整流程說明",
+    "",
+    "🎯 過關方式：有關主的關卡，向關主取得關鍵字後直接輸入；沒有關主的關卡，直接上傳照片或影片，等小編確認。",
+  ];
+  if (role === "LEADER") {
+    lines.push("", "👑 您是隊長：關卡公告會推播給您，請轉達給組員。");
+  } else {
+    lines.push("• 接任隊長 X組：想換隊長時發起申請（需小編核准）");
+    if (configStore.getBroadcastScope() === "leader") {
+      lines.push(
+        "",
+        "ℹ️ 目前關卡公告只會推播給隊長，想知道最新關卡可輸入「目前關卡」，或請隊長轉達。"
+      );
+    }
+  }
+  return textMsg(lines.join("\n"));
+}
+
+function refereeHelpMsg() {
+  return textMsg(
+    [
+      "📖 關主可用指令",
+      "• 進度：查看有哪些隊伍已出發正往您這關來、或已抵達等待確認",
+      "• 通過 X組（例如「通過 1組」）：確認該組完成您這一關，解鎖下一關（只對您登記的這一關生效）",
+      "• 關主報到／我是 XX 關主：想換負責的關卡時重新登記",
+      "• 我的ID：查詢自己的 userId",
+      "",
+      "🔔 有隊伍出發或過關、正往您這關前進時，系統會自動通知您。",
+    ].join("\n")
+  );
+}
+
+function broadcasterHelpMsg() {
+  return textMsg(
+    [
+      "📖 總領隊可用指令",
+      "• 推播 隊長 訊息內容：一行打完，直接送出（對象可換成「關主」「所有人」）",
+      "• 推播 隊長：先選對象，下一則訊息就是推播內容",
+      "• 推播：依序回覆對象與內容",
+      "• 取消：中途放棄推播",
+      "• 我的ID：查詢自己的 userId",
+      "",
+      "⚠️ 「所有人」會推給全部隊伍成員與關主，推播則數較多，請斟酌使用。",
+    ].join("\n")
+  );
+}
+
 // ---- 一、報到 ----
 
 async function checkin(groupNo, userId) {
@@ -175,6 +230,7 @@ async function checkin(groupNo, userId) {
       );
       return [
         textMsg(`✅ 報到成功！您是第 ${groupNo} 組隊長。\n請等待關主宣布出發。`),
+        teamHelpMsg("LEADER"),
       ];
     }
 
@@ -184,6 +240,7 @@ async function checkin(groupNo, userId) {
     );
     return [
       textMsg(`✅ 報到成功！您已加入第 ${groupNo} 組（組員身分）。\n請等待關主宣布出發。`),
+      teamHelpMsg("MEMBER"),
     ];
   });
 }
@@ -508,6 +565,7 @@ async function registerReferee(userId, checkpointId) {
     textMsg(
       `✅ 已登記為「${cp.name}」（${cp.id}）的關主。之後隊伍在這一關完成任務後，直接輸入「通過 X組」即可為該組解鎖下一關。`
     ),
+    refereeHelpMsg(),
   ];
 }
 
@@ -595,9 +653,8 @@ async function registerBroadcaster(userId) {
   );
 
   return [
-    textMsg(
-      "✅ 已登記為總領隊。之後輸入「推播」即可選擇對象（隊長、關主、所有人）發送訊息，也可以直接輸入「推播 隊長」再打內容，或一次打完「推播 隊長 訊息內容」。"
-    ),
+    textMsg("✅ 已登記為總領隊。"),
+    broadcasterHelpMsg(),
   ];
 }
 

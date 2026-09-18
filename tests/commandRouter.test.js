@@ -121,6 +121,35 @@ test("我的ID：任何人都能查自己的 userId，不需要報到或任何�
   assert.match(textsOf(result)[0], /UsomeRandomPerson/);
 });
 
+test("登記／報到成功後，會主動附上該身分自己可用的指令說明（不含小編專用指令）", async () => {
+  await resetGame();
+  const leader = await commandRouter.route("Uleader", "報到 1組");
+  assert.match(textsOf(leader)[1], /隊伍可用指令/);
+  assert.match(textsOf(leader)[1], /您是隊長/);
+
+  const member = await commandRouter.route("Umember", "報到 1組");
+  assert.match(textsOf(member)[1], /接任隊長 X組/);
+  assert.match(textsOf(member)[1], /關卡公告只會推播給隊長/);
+
+  const referee = await commandRouter.route("Ureferee", "關主報到");
+  assert.match(textsOf(referee)[0], /請回覆您負責的關卡/);
+  const registered = await commandRouter.route("Ureferee", "B3");
+  assert.match(textsOf(registered)[0], /已登記為「救救菜英文」（B3）的關主/);
+  assert.match(textsOf(registered)[1], /關主可用指令/);
+  assert.match(textsOf(registered)[1], /進度/);
+  assert.match(textsOf(registered)[1], /通過 X組/);
+
+  const broadcaster = await commandRouter.route(STAFF, "總領綁定");
+  assert.match(textsOf(broadcaster)[0], /已登記為總領隊/);
+  assert.match(textsOf(broadcaster)[1], /總領隊可用指令/);
+  assert.match(textsOf(broadcaster)[1], /推播 隊長 訊息內容/);
+
+  // 隊伍與關主的說明都不該洩漏小編專用指令
+  for (const text of [textsOf(leader)[1], textsOf(member)[1], textsOf(registered)[1], textsOf(broadcaster)[1]]) {
+    assert.doesNotMatch(text, /重置遊戲|解除綁定|加分 X組|確認換隊長/);
+  }
+});
+
 test("出發：未報到組別無法出發，成功後廣播第一關", async () => {
   await resetGame();
   const noTeam = await commandRouter.route(ADMIN, "出發 9組");
