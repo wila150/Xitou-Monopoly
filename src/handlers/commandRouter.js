@@ -99,7 +99,7 @@ async function route(userId, rawText) {
     return {
       reply: result.reply,
       groupBroadcasts: result.groupBroadcast ? [result.groupBroadcast] : [],
-      directPushes: [],
+      directPushes: result.directPushes || [],
     };
   }
 
@@ -144,7 +144,7 @@ async function route(userId, rawText) {
     return {
       reply: result.reply,
       groupBroadcasts: result.groupBroadcast ? [result.groupBroadcast] : [],
-      directPushes: [],
+      directPushes: result.directPushes || [],
     };
   }
 
@@ -263,8 +263,13 @@ async function route(userId, rawText) {
   }
 
   if (text === "進度") {
-    if (!isAdmin(userId)) return adminOnlyDenied();
-    return withReply(await teamService.adminListProgress());
+    if (isAdmin(userId)) {
+      return withReply(await teamService.adminListProgress());
+    }
+    // 關主也能查詢，但只看得到跟自己登記的那一關有關的組別（見 refereeListProgress）
+    const checkpointId = await teamService.getRefereeCheckpoint(userId);
+    if (!checkpointId) return approveOnlyDenied();
+    return withReply(await teamService.refereeListProgress(checkpointId));
   }
 
   if (text === "排行榜") {
@@ -289,8 +294,12 @@ async function route(userId, rawText) {
   }
 
   // 以上皆非固定指令 -> 視為關卡關鍵字嘗試（有現場關主的 6 關）
-  const reply = await teamService.verifyKeyword(userId, text);
-  return withReply(reply);
+  const result = await teamService.verifyKeyword(userId, text);
+  return {
+    reply: result.reply,
+    groupBroadcasts: [],
+    directPushes: result.directPushes || [],
+  };
 }
 
 module.exports = { route };

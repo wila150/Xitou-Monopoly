@@ -261,6 +261,9 @@ router.post("/api/submissions/:id/approve", async (req, res, next) => {
       );
       await lineClient.pushToMany(recipientIds, result.groupBroadcast.messages);
     }
+    for (const p of result.directPushes || []) {
+      await lineClient.push(p.to, p.messages);
+    }
     res.json({ ok: true, message: (result.reply || []).map((m) => m.text).join("\n") });
   } catch (err) {
     next(err);

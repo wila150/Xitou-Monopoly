@@ -212,10 +212,12 @@ async function depart(groupNo) {
 
     const announcement = checkpointAnnouncement(route[0].checkpointId, { isFirst: true });
     const teamMessages = [textMsg(`🚩 第 ${groupNo} 組出發！開始計時。`), ...announcement];
+    const refereePushes = await getRefereePushesForCheckpoint(route[0].checkpointId, groupNo);
 
     return {
       reply: [textMsg(`🚩 已將第 ${groupNo} 組標記為出發。`)],
       groupBroadcast: { groupNo, messages: teamMessages },
+      directPushes: refereePushes,
     };
   });
 }
@@ -256,7 +258,19 @@ async function checkAttemptGuards(tx, userId) {
   return { team, route, expected, cp };
 }
 
-// 實際過關：寫紀錄、往下一關前進，回傳「通關確認＋下一關公告」的訊息陣列
+// 隊伍出發／過關前進到某一關時，主動通知登記在該關的關主「有隊伍正往你這關來」，
+// 關主才不用被動等隊伍走到面前才知道。同一關可能有多個人登記，全部都通知。
+async function getRefereePushesForCheckpoint(checkpointId, groupNo) {
+  const rows = await db.all("SELECT user_id FROM referees WHERE checkpoint_id = ?", [
+    checkpointId,
+  ]);
+  if (rows.length === 0) return [];
+  const cp = getCheckpoint(checkpointId);
+  const message = textMsg(`🚶 第 ${groupNo} 組正往您這關（${cp.id}｜${cp.name}）前進，請留意。`);
+  return rows.map((r) => ({ to: r.user_id, messages: [message] }));
+}
+
+// 實際過關：寫紀錄、往下一關前進，回傳「通關確認＋下一關公告」訊息，以及要通知下一關關主的推播
 async function advanceCheckpoint(tx, team, expected, cp, route) {
   const ts = nowIso();
   await tx.run(
@@ -275,38 +289,51 @@ async function advanceCheckpoint(tx, team, expected, cp, route) {
   const confirm = textMsg(`✅ 通關：${cp.name}`);
 
   if (newIndex >= route.length) {
-    return [
-      confirm,
-      textMsg(`🎉 恭喜完成所有 ${route.length} 關！請儘速前往 B6 辦理終點確認。`),
-    ];
+    return {
+      teamMessages: [
+        confirm,
+        textMsg(`🎉 恭喜完成所有 ${route.length} 關！請儘速前往 B6 辦理終點確認。`),
+      ],
+      refereePushes: [],
+    };
   }
 
   const next = route[newIndex];
-  return [confirm, ...checkpointAnnouncement(next.checkpointId)];
+  const refereePushes = await getRefereePushesForCheckpoint(next.checkpointId, team.group_no);
+  return { teamMessages: [confirm, ...checkpointAnnouncement(next.checkpointId)], refereePushes };
 }
 
 // ---- 三之一、有關主的 6 關：關鍵字比對正確後立即過關 ----
 
+// 回傳 { reply, directPushes }：reply 是要直接回覆給打關鍵字的人的訊息，
+// directPushes 是過關成功時要主動通知下一關關主的推播（見 getRefereePushesForCheckpoint）。
 async function verifyKeyword(userId, text) {
   return transaction(async (tx) => {
     const guard = await checkAttemptGuards(tx, userId);
-    if (guard.blocked !== undefined) return guard.blocked;
+    if (guard.blocked !== undefined) return { reply: guard.blocked, directPushes: [] };
     const { team, route, expected, cp } = guard;
 
     if (cp.verifyType === "referee") {
-      return [
-        textMsg("🙋 這一關由關主現場確認完成，不需要輸入任何文字，請等待關主或小編為您解鎖下一關。"),
-      ];
+      return {
+        reply: [
+          textMsg("🙋 這一關由關主現場確認完成，不需要輸入任何文字，請等待關主或小編為您解鎖下一關。"),
+        ],
+        directPushes: [],
+      };
     }
     if (cp.verifyType !== "keyword") {
       const kind = cp.verifyType === "video" ? "影片" : "照片";
-      return [textMsg(`📷 這一關沒有現場關主，請直接上傳${kind}，不需要輸入文字關鍵字。`)];
+      return {
+        reply: [textMsg(`📷 這一關沒有現場關主，請直接上傳${kind}，不需要輸入文字關鍵字。`)],
+        directPushes: [],
+      };
     }
     if (!matchesKeyword(text, expected.keyword)) {
-      return [textMsg("❌ 不正確，請向關主確認。")];
+      return { reply: [textMsg("❌ 不正確，請向關主確認。")], directPushes: [] };
     }
 
-    return advanceCheckpoint(tx, team, expected, cp, route);
+    const { teamMessages, refereePushes } = await advanceCheckpoint(tx, team, expected, cp, route);
+    return { reply: teamMessages, directPushes: refereePushes };
   });
 }
 
@@ -412,10 +439,11 @@ async function approveCheckpoint(groupNo, restrictToCheckpointId = null) {
       };
     }
 
-    const teamMessages = await advanceCheckpoint(tx, team, expected, cp, route);
+    const { teamMessages, refereePushes } = await advanceCheckpoint(tx, team, expected, cp, route);
     return {
       reply: [textMsg(`✅ 已為第 ${groupNo} 組確認「${cp.name}」通過。`)],
       groupBroadcast: { groupNo, messages: teamMessages },
+      directPushes: refereePushes,
     };
   });
 }
@@ -946,6 +974,31 @@ async function adminListProgress() {
   return [textMsg(`📋 目前進度\n${lines.join("\n")}`)];
 }
 
+// 關主專用的「進度」查詢：只列出跟自己這關有關的組別——已出發、還沒到這關的（還在路上），
+// 跟已經抵達卡在這關、等待確認的，不顯示已經通過這關或還沒出發的組別，避免洩漏跟自己無關的細節。
+async function refereeListProgress(checkpointId) {
+  const cp = getCheckpoint(checkpointId);
+  const groupNos = getAllGroupNos();
+  const teams = await Promise.all(groupNos.map((groupNo) => findTeam(db, groupNo)));
+  const lines = [];
+  for (let i = 0; i < groupNos.length; i++) {
+    const team = teams[i];
+    if (!team || team.status === "CHECKED_IN" || team.status === "FINISHED") continue;
+    const route = getRoute(groupNos[i]);
+    const idx = route.findIndex((s) => s.checkpointId === checkpointId);
+    if (idx === -1 || team.current_index > idx) continue; // 路線沒經過這關，或已經通過這關了
+    if (team.current_index === idx) {
+      lines.push(`${groupNos[i]}組｜✋ 已抵達，等待確認`);
+    } else {
+      lines.push(`${groupNos[i]}組｜🚶 已出發，還在路上（還差 ${idx - team.current_index} 關）`);
+    }
+  }
+  if (lines.length === 0) {
+    return [textMsg(`📋 ${cp.id}｜${cp.name}\n目前沒有隊伍在路上或抵達，稍後再查詢看看。`)];
+  }
+  return [textMsg(`📋 ${cp.id}｜${cp.name}\n${lines.join("\n")}`)];
+}
+
 // 給後台網頁用的 JSON 版進度快照（跟 adminListProgress 同一份資料，只是格式給網頁用而不是 LINE 文字）
 async function getProgressSnapshot() {
   const groupNos = getAllGroupNos();
@@ -1087,6 +1140,7 @@ module.exports = {
   queryCurrentCheckpoint,
   queryProgress,
   adminListProgress,
+  refereeListProgress,
   getProgressSnapshot,
   isRankingPublic,
   setRankingPublic,

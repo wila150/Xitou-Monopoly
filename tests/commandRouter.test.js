@@ -141,6 +141,47 @@ test("出發：未報到組別無法出發，成功後廣播第一關", async ()
   assert.match(textsOf(again)[0], /已經出發過了/);
 });
 
+test("關主主動通知：出發跟過關時，登記在下一關的關主會收到「隊伍正往你這關來」的推播", async () => {
+  await resetGame();
+  // 第1組路線：D5（第一關）-> B3（第二關）
+  await commandRouter.route("Ud5referee", "我是 D5 關主");
+  await commandRouter.route("Ub3referee", "我是 B3 關主");
+  await commandRouter.route("Uleader", "報到 1組");
+
+  const depart = await commandRouter.route(ADMIN, "出發 1組");
+  assert.equal(depart.directPushes.length, 1);
+  assert.equal(depart.directPushes[0].to, "Ud5referee");
+  assert.match(depart.directPushes[0].messages[0].text, /第 1 組正往您這關（D5/);
+
+  // D5 是 photo 類型，走「上傳 -> 小編通過」流程過關，過關後應該通知 B3 的關主
+  await teamService.submitMedia("Uleader");
+  const approve = await commandRouter.route(ADMIN, "通過 1組");
+  assert.equal(approve.directPushes.length, 1);
+  assert.equal(approve.directPushes[0].to, "Ub3referee");
+  assert.match(approve.directPushes[0].messages[0].text, /第 1 組正往您這關（B3/);
+});
+
+test("關主專用進度查詢：「進度」只顯示跟自己這關有關的組別（在路上／已抵達），不顯示已通過或無關的組別", async () => {
+  await resetGame();
+  await commandRouter.route("Ub3referee", "我是 B3 關主");
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route(ADMIN, "出發 1組"); // 第1組目前在 D5，B3 是下一關
+
+  const enRoute = await commandRouter.route("Ub3referee", "進度");
+  assert.match(textsOf(enRoute)[0], /1組｜🚶 已出發，還在路上/);
+
+  await teamService.submitMedia("Uleader");
+  await commandRouter.route(ADMIN, "通過 1組"); // 第1組現在剛好卡在 B3
+
+  const arrived = await commandRouter.route("Ub3referee", "進度");
+  assert.match(textsOf(arrived)[0], /1組｜✋ 已抵達，等待確認/);
+
+  await commandRouter.route(ADMIN, "通過 1組"); // 通過 B3 之後跟這一關無關了，不該再出現
+
+  const passed = await commandRouter.route("Ub3referee", "進度");
+  assert.match(textsOf(passed)[0], /目前沒有隊伍在路上或抵達/);
+});
+
 test("關卡公告推播範圍：預設只推隊長，切成 all 之後改推全組成員，可以隨時切回來", async () => {
   await resetGame();
   await commandRouter.route("Uleader", "報到 1組"); // 第一位報到者是隊長
@@ -374,7 +415,6 @@ test("管理指令：非小編一律被拒絕", async () => {
   await commandRouter.route("Uleader", "報到 1組");
 
   const denied = await Promise.all([
-    commandRouter.route("Uleader", "進度"),
     commandRouter.route("Uleader", "遊戲結束"),
     commandRouter.route("Uleader", "排行榜開啟"),
     commandRouter.route("Uleader", "解除綁定 1組"),
@@ -384,6 +424,10 @@ test("管理指令：非小編一律被拒絕", async () => {
   for (const r of denied) {
     assert.match(textsOf(r)[0], /僅限小編使用/);
   }
+
+  // 「進度」比較特別：非小編、也非登記關主才會被拒絕（登記過的關主可以查詢，見後面的關主專用進度測試）
+  const progressDenied = await commandRouter.route("Uleader", "進度");
+  assert.match(textsOf(progressDenied)[0], /僅限小編或登記過的關主使用/);
 });
 
 test("遊戲結束：只凍結關卡進度，不會產生終點確認，之後仍可到站", async () => {
@@ -626,8 +670,9 @@ test("關主自助登記：「我是 B3 關主」後可以用通過，但只對�
   assert.match(textsOf(rightScope)[0], /已為第 1 組確認/);
   assert.equal((await teamService.findTeam(1)).current_index, 2);
 
-  const deniedProgress = await commandRouter.route(STAFF, "進度");
-  assert.match(textsOf(deniedProgress)[0], /僅限小編使用/);
+  // 關主現在也能查「進度」，但只看得到跟自己這關有關的組別——第1組已經通過 B3 了，不該再出現
+  const refereeProgress = await commandRouter.route(STAFF, "進度");
+  assert.match(textsOf(refereeProgress)[0], /目前沒有隊伍在路上或抵達/);
 });
 
 test("關主自助登記：同一帳號重新登記會覆蓋成新的關卡", async () => {
