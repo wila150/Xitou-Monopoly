@@ -166,6 +166,45 @@ test("登記入口說法很彈性：關主報到／關主綁定／報到 關主�
   assert.match(textsOf(team)[0], /請回覆您的組別編號/);
 });
 
+test("使用說明：依身分回覆不同內容，多重身分一併列出，小編指令只給小編看", async () => {
+  await resetGame();
+  // 還沒有任何身分：一般說明，只教報到流程，不出現關主／總領隊／小編指令
+  const general = textsOf(await commandRouter.route("Ustranger", "使用說明"));
+  assert.equal(general.length, 1);
+  assert.match(general[0], /1️⃣ 報到/);
+  assert.doesNotMatch(general[0], /推播|通過 X組|重置遊戲|關主報到/);
+
+  await commandRouter.route("Uleader", "報到 1組");
+  await commandRouter.route("Umember", "報到 1組");
+  const leader = textsOf(await commandRouter.route("Uleader", "使用說明"));
+  assert.match(leader[0], /第 1 組隊長/);
+  assert.match(leader[0], /目前關卡/);
+  const member = textsOf(await commandRouter.route("Umember", "使用說明"));
+  assert.match(member[0], /第 1 組組員/);
+  assert.match(member[0], /接任隊長 X組/);
+
+  await commandRouter.route("Ureferee", "我是 B3 關主");
+  const referee = textsOf(await commandRouter.route("Ureferee", "使用說明"));
+  assert.equal(referee.length, 1);
+  assert.match(referee[0], /B3「救救菜英文」關主/);
+  assert.match(referee[0], /通過 X組/);
+
+  // 關主兼總領隊：兩份說明一起給
+  await commandRouter.route("Ureferee", "總領綁定");
+  const both = textsOf(await commandRouter.route("Ureferee", "使用說明"));
+  assert.equal(both.length, 2);
+  assert.match(both[1], /使用說明｜總領隊/);
+
+  const admin = textsOf(await commandRouter.route(ADMIN, "使用說明"));
+  assert.match(admin[0], /使用說明｜小編/);
+  assert.match(admin[0], /重置遊戲/);
+
+  // 隊伍、關主的說明不洩漏小編專用指令
+  for (const text of [leader[0], member[0], referee[0]]) {
+    assert.doesNotMatch(text, /重置遊戲|解除綁定|加分 X組|確認換隊長/);
+  }
+});
+
 test("出發：未報到組別無法出發，成功後廣播第一關", async () => {
   await resetGame();
   const noTeam = await commandRouter.route(ADMIN, "出發 9組");

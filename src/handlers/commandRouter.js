@@ -354,17 +354,8 @@ async function route(userId, rawText) {
   }
 
   if (text === "使用說明") {
-    return withReply([
-      teamService.textMsg(
-        "🌲 森呼吸．永續漫遊｜使用說明\n\n" +
-          "1️⃣ 報到：輸入您的組別編號，例如「1組」或「第一組」，第一位報到者是隊長\n" +
-          "2️⃣ 出發：關主確認隊伍到齊後會公布第一關\n" +
-          "3️⃣ 過關：有關主的關卡輸入關主告知的關鍵字；沒有關主的關卡直接上傳照片或影片，等小編確認\n" +
-          "4️⃣ 查詢：「目前關卡」看這一關資訊、「闖關進度」看完成幾關與耗時\n" +
-          "5️⃣ 終點：全部關卡（或提前結束）後，帶隊伍到 B6 由工作人員辦理終點確認\n\n" +
-          "有問題請直接聯繫現場小編。"
-      ),
-    ]);
+    // 依身分回覆不同內容（隊長／組員／關主／總領隊／小編），都不是才給一般說明
+    return withReply(await teamService.usageGuideFor(userId, isAdmin(userId)));
   }
 
   if (text === "目前關卡") {

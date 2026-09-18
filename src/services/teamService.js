@@ -144,9 +144,9 @@ async function isProgressFrozen(exec) {
 
 // ---- 登記／報到成功後主動附上「這個身分可以用的指令」，只列該身分自己的，不洩漏小編專用指令 ----
 
-function teamHelpMsg(role) {
+function teamHelpMsg(role, groupNo = null) {
   const lines = [
-    "📖 隊伍可用指令",
+    groupNo ? `📖 使用說明｜第 ${groupNo} 組${role === "LEADER" ? "隊長" : "組員"}` : "📖 隊伍可用指令",
     "• 目前關卡：查詢這一關的地點、玩法與過關方式",
     "• 闖關進度：查詢已完成關卡數與累計耗時",
     "• 排行榜：小編開放後才能查詢",
@@ -168,10 +168,18 @@ function teamHelpMsg(role) {
   return textMsg(lines.join("\n"));
 }
 
-function refereeHelpMsg() {
+function refereeHelpMsg(checkpointId = null) {
+  let title = "📖 關主可用指令";
+  if (checkpointId) {
+    try {
+      title = `📖 使用說明｜${checkpointId}「${getCheckpoint(checkpointId).name}」關主`;
+    } catch {
+      title = `📖 使用說明｜${checkpointId} 關主`;
+    }
+  }
   return textMsg(
     [
-      "📖 關主可用指令",
+      title,
       "• 進度：查看有哪些隊伍已出發正往您這關來、或已抵達等待確認",
       "• 通過 X組（例如「通過 1組」）：確認該組完成您這一關，解鎖下一關（只對您登記的這一關生效）",
       "• 關主報到（或關主綁定）／我是 XX 關主：想換負責的關卡時重新登記",
@@ -182,10 +190,10 @@ function refereeHelpMsg() {
   );
 }
 
-function broadcasterHelpMsg() {
+function broadcasterHelpMsg(guide = false) {
   return textMsg(
     [
-      "📖 總領隊可用指令",
+      guide ? "📖 使用說明｜總領隊" : "📖 總領隊可用指令",
       "• 推播 隊長 訊息內容：一行打完，直接送出（對象可換成「關主」「所有人」）",
       "• 推播 隊長：先選對象，下一則訊息就是推播內容",
       "• 推播：依序回覆對象與內容",
@@ -195,6 +203,53 @@ function broadcasterHelpMsg() {
       "⚠️ 「所有人」會推給全部隊伍成員與關主，推播則數較多，請斟酌使用。",
     ].join("\n")
   );
+}
+
+function adminHelpMsg() {
+  return textMsg(
+    [
+      "📖 使用說明｜小編",
+      "• 通過 X組：任何關卡都能直接通過，不受關主登記限制",
+      "• 退回 X組：更正誤觸的通過或到站",
+      "• 解除綁定 X組：清空該組的綁定與報到",
+      "• 確認換隊長 X組：核准組員的換隊長申請",
+      "• 加分 X組 N 理由：加分或扣分（N 可以是負數）",
+      "• 進度：查看所有組別狀態",
+      "• 遊戲結束：提前停止受理新的關卡進度",
+      "• 排行榜開啟／排行榜關閉：控制排行榜是否公開",
+      "• 推播（隊長／關主／所有人）：小編不用登記就能用",
+      "• 重置關主／重置總領隊：清空登記",
+      "• 重置遊戲 → 重置遊戲 確認：清空整場資料（不含關主與總領隊登記）",
+      "",
+      "🖥 完整功能請登入後台網頁 /admin（審核照片影片、編輯關卡與路線、看即時進度）。",
+    ].join("\n")
+  );
+}
+
+function generalGuideMsg() {
+  return textMsg(
+    "🌲 森呼吸．永續漫遊｜使用說明\n\n" +
+      "1️⃣ 報到：輸入您的組別編號，例如「1組」或「第一組」，第一位報到者是隊長\n" +
+      "2️⃣ 出發：關主確認隊伍到齊後會公布第一關\n" +
+      "3️⃣ 過關：有關主的關卡輸入關主告知的關鍵字；沒有關主的關卡直接上傳照片或影片，等小編確認\n" +
+      "4️⃣ 查詢：「目前關卡」看這一關資訊、「闖關進度」看完成幾關與耗時\n" +
+      "5️⃣ 終點：全部關卡（或提前結束）後，帶隊伍到 B6 由工作人員辦理終點確認\n\n" +
+      "完成報到後，再輸入一次「使用說明」會看到您這個身分專屬的指令。\n" +
+      "有問題請直接聯繫現場小編。"
+  );
+}
+
+// 「使用說明」依身分回覆不同內容：隊長／組員、關主、總領隊、小編各自只看到自己的指令，
+// 同時擁有多個身分（例如關主兼總領隊、小編）就一起列出；都不是才給一般說明。
+async function usageGuideFor(userId, isAdminUser) {
+  const messages = [];
+  const membership = await findMembership(db, userId);
+  if (membership) messages.push(teamHelpMsg(membership.role, membership.group_no));
+  const refereeCheckpoint = await getRefereeCheckpoint(userId);
+  if (refereeCheckpoint) messages.push(refereeHelpMsg(refereeCheckpoint));
+  if (await isBroadcaster(userId)) messages.push(broadcasterHelpMsg(true));
+  if (isAdminUser) messages.push(adminHelpMsg());
+  return messages.length > 0 ? messages : [generalGuideMsg()];
 }
 
 // ---- 一、報到 ----
@@ -1237,6 +1292,7 @@ module.exports = {
   listPendingSubmissions,
   approveSubmissionById,
   registerReferee,
+  usageGuideFor,
   tryRefereeBareRegistration,
   getRefereeCheckpoint,
   resetReferees,
