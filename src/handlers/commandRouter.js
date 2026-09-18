@@ -64,6 +64,7 @@ const PENDING_BROADCAST_TTL_MS = 3 * 60 * 1000;
 const EMERGENCY_RE = /^(?:緊急聯絡|緊急求助)(?:[\s:：]+([\s\S]+))?$/;
 // 小編接手：「處理緊急 3」「處理緊急 #3」，LINE 警報訊息底下的「我來處理」按鈕會送出這句
 const HANDLE_EMERGENCY_RE = /^處理緊急\s*#?\s*([0-9]+)$/;
+const ORDER_RE = /^(?:組別)?順序(?:\s+(.+))?$/;
 const TRANSFER_REQUEST_RE = verbGroupRegex("接任隊長");
 const TRANSFER_CONFIRM_RE = verbGroupRegex("確認換隊長");
 const UNBIND_RE = verbGroupRegex("解除綁定");
@@ -383,6 +384,17 @@ async function route(userId, rawText) {
 
   if (text === "闖關進度") {
     return withReply(await teamService.queryProgress(userId));
+  }
+
+  // 「順序」：關主看自己這關的來訪順序（等同「進度」）；小編要指定關卡，例如「順序 B3」
+  m = text.match(ORDER_RE);
+  if (m) {
+    if (isAdmin(userId)) {
+      return withReply(await teamService.adminCheckpointOrder(m[1]));
+    }
+    const checkpointId = await teamService.getRefereeCheckpoint(userId);
+    if (!checkpointId) return approveOnlyDenied();
+    return withReply(await teamService.refereeListProgress(checkpointId));
   }
 
   if (text === "進度") {

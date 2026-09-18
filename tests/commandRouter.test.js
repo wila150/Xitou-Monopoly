@@ -261,10 +261,42 @@ test("關主專用進度查詢：「進度」只顯示跟自己這關有關的�
   const arrived = await commandRouter.route("Ub3referee", "進度");
   assert.match(textsOf(arrived)[0], /1組｜✋ 已抵達，等待確認/);
 
-  await commandRouter.route(ADMIN, "通過 1組"); // 通過 B3 之後跟這一關無關了，不該再出現
+  await commandRouter.route(ADMIN, "通過 1組"); // 通過 B3 之後歸到「已通過」，不再是等待確認
 
   const passed = await commandRouter.route("Ub3referee", "進度");
-  assert.match(textsOf(passed)[0], /目前沒有隊伍在路上或抵達/);
+  assert.match(textsOf(passed)[0], /1組｜✅ 已通過/);
+  assert.doesNotMatch(textsOf(passed)[0], /已抵達|還在路上/);
+});
+
+test("關主看來訪順序：已通過 → 目前輪到 → 在路上，連續編號；「順序」等同「進度」；小編用「順序 B3」；無關身分被拒絕", async () => {
+  await resetGame();
+  await commandRouter.route("Ub3referee", "我是 B3 關主");
+  for (const [user, group] of [["Ul1", 1], ["Ul2", 2]]) {
+    await commandRouter.route(user, `報到 ${group}組`);
+    await commandRouter.route(ADMIN, `出發 ${group}組`);
+  }
+  // 兩組路線不同：找出各自到 B3 的位置，讓第 1 組先走到 B3、通過；第 2 組留在路上
+  const idx1 = getRoute(1).findIndex((s) => s.checkpointId === "B3");
+  for (let i = 0; i < idx1; i++) await commandRouter.route(ADMIN, "通過 1組");
+  const idx2 = getRoute(2).findIndex((s) => s.checkpointId === "B3");
+  assert.ok(idx2 > 0, "測試前提：第 2 組的路線上 B3 不是第一關");
+
+  const beforePass = textsOf(await commandRouter.route("Ub3referee", "順序"))[0];
+  assert.match(beforePass, /來訪順序/);
+  const waitingPos = beforePass.indexOf("1組｜✋ 已抵達，等待確認");
+  const enRoutePos = beforePass.indexOf("2組｜🚶 已出發，還在路上");
+  assert.ok(waitingPos > -1 && enRoutePos > waitingPos, "目前輪到的排在還在路上的前面");
+  assert.match(beforePass, /出發前往）/);
+
+  await commandRouter.route(ADMIN, "通過 1組"); // 第 1 組通過 B3
+  const afterPass = textsOf(await commandRouter.route("Ub3referee", "組別順序"))[0];
+  assert.match(afterPass, /① 1組｜✅ 已通過（\d{2}:\d{2}）/);
+  assert.match(afterPass, /② 2組｜🚶/);
+
+  // 小編指定關卡（代號或名稱）；沒指定要提示；沒身分的人被拒絕
+  assert.match(textsOf(await commandRouter.route(ADMIN, "順序 b3"))[0], /B3.*來訪順序/);
+  assert.match(textsOf(await commandRouter.route(ADMIN, "順序"))[0], /請指定關卡/);
+  assert.match(textsOf(await commandRouter.route("Unobody", "順序"))[0], /僅限小編或登記過的關主使用/);
 });
 
 test("關卡公告推播範圍：預設只推隊長，切成 all 之後改推全組成員，可以隨時切回來", async () => {
@@ -788,7 +820,7 @@ test("關主自助登記：「我是 B3 關主」後可以用通過，但只對�
 
   // 關主現在也能查「進度」，但只看得到跟自己這關有關的組別——第1組已經通過 B3 了，不該再出現
   const refereeProgress = await commandRouter.route(STAFF, "進度");
-  assert.match(textsOf(refereeProgress)[0], /目前沒有隊伍在路上或抵達/);
+  assert.match(textsOf(refereeProgress)[0], /1組｜✅ 已通過/);
 });
 
 test("關主自助登記：同一帳號重新登記會覆蓋成新的關卡", async () => {
