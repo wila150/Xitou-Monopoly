@@ -1835,6 +1835,43 @@ async function adminCheckpointOrder(text) {
   return refereeListProgress(cp.id);
 }
 
+// 後台網頁用：某一關的通過順序，回傳結構化資料（不是文字訊息），方便網頁排序、標出「最快」。
+// 排序規則：已通過的依通過時間由早到晚排最前面，其餘（等待確認／還在路上／尚未出發／尚未報到）依組別編號排在後面。
+async function checkpointPassOrder(checkpointId) {
+  const cp = getCheckpoint(checkpointId); // 找不到會拋出例外，交給呼叫端處理
+  const groupNos = getAllGroupNos();
+  const teams = await Promise.all(groupNos.map((groupNo) => findTeam(db, groupNo)));
+  const passedRows = await db.all("SELECT group_no, passed_at FROM checkpoint_log WHERE checkpoint_id = ?", [
+    checkpointId,
+  ]);
+  const passedAtByGroup = new Map(passedRows.map((r) => [r.group_no, r.passed_at]));
+
+  const planned = [];
+  for (let i = 0; i < groupNos.length; i++) {
+    const idx = getRoute(groupNos[i]).findIndex((s) => s.checkpointId === checkpointId);
+    if (idx !== -1) planned.push({ groupNo: groupNos[i], plannedIndex: idx, team: teams[i] });
+  }
+
+  const rows = planned.map(({ groupNo, plannedIndex, team }) => {
+    const passedAt = passedAtByGroup.get(groupNo) || null;
+    let status;
+    if (passedAt) status = "PASSED";
+    else if (!team) status = "NOT_CHECKED_IN";
+    else if (team.status === "CHECKED_IN") status = "NOT_STARTED";
+    else if (team.current_index === plannedIndex) status = "WAITING";
+    else status = "EN_ROUTE";
+    return { groupNo, plannedIndex: plannedIndex + 1, passedAt, status };
+  });
+
+  rows.sort((a, b) => {
+    if (a.passedAt && b.passedAt) return a.passedAt < b.passedAt ? -1 : a.passedAt > b.passedAt ? 1 : 0;
+    if (a.passedAt) return -1;
+    if (b.passedAt) return 1;
+    return a.groupNo - b.groupNo;
+  });
+  return { checkpointId: cp.id, checkpointName: cp.name, rows };
+}
+
 // 給後台網頁用的 JSON 版進度快照（跟 adminListProgress 同一份資料，只是格式給網頁用而不是 LINE 文字）
 async function getProgressSnapshot() {
   const groupNos = getAllGroupNos();
@@ -2004,6 +2041,7 @@ module.exports = {
   adminListProgress,
   refereeListProgress,
   adminCheckpointOrder,
+  checkpointPassOrder,
   getProgressSnapshot,
   isRankingPublic,
   setRankingPublic,

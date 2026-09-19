@@ -384,6 +384,40 @@ test("後台指定關主：不需要對方自己傳訊息，指定後對方收�
   assert.equal((await api("/referees/Ustaff", { method: "DELETE" })).status, 400);
 });
 
+test("後台查通過順序：依通過時間排序，最快的排最前面；未知關卡回 404", async () => {
+  await resetGame();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (const g of [1, 2, 3]) await commandRouter.route(`Ul${g}`, `報到 ${g}組`);
+  for (const g of [1, 2, 3]) await commandRouter.route("Uadmin", `出發 ${g}組`);
+
+  // 三組路線各自不同，先把每組都推進到各自路線上 B3 之前，再依序通過 B3，確認回傳順序符合實際按下通過的時間先後
+  for (const groupNo of [1, 2, 3]) {
+    const idx = getRoute(groupNo).findIndex((s) => s.checkpointId === "B3");
+    assert.ok(idx !== -1, `第 ${groupNo} 組路線應該有 B3`);
+    for (let i = 0; i < idx; i++) await commandRouter.route("Uadmin", `通過 ${groupNo}組`);
+  }
+  // 故意用不同順序通過：3組 -> 1組 -> 2組，中間間隔一下確保時間戳不同
+  await commandRouter.route("Uadmin", "通過 3組");
+  await sleep(5);
+  await commandRouter.route("Uadmin", "通過 1組");
+  await sleep(5);
+  await commandRouter.route("Uadmin", "通過 2組");
+
+  const res = await api("/checkpoint-log/B3");
+  assert.equal(res.status, 200);
+  assert.equal(res.data.checkpointId, "B3");
+  const passed = res.data.rows.filter((r) => r.status === "PASSED");
+  assert.deepEqual(
+    passed.map((r) => r.groupNo),
+    [3, 1, 2],
+    "應依實際通過時間排序（先通過的排前面），不是依組別編號"
+  );
+  assert.ok(new Date(passed[0].passedAt) <= new Date(passed[1].passedAt));
+
+  const notFound = await api("/checkpoint-log/Z9");
+  assert.equal(notFound.status, 404);
+});
+
 test("後台指定／移除總領隊：指定後可以用「推播」與「出發」，移除後失效", async () => {
   await resetGame();
   await lineUserStore.touch("Uboss");

@@ -198,6 +198,18 @@ router.get("/api/progress", async (req, res, next) => {
   }
 });
 
+// 某一關的通過順序（依通過時間排序），用途例如「哪一組最早通過 B6」。等同 LINE 指令「順序 B6」，回傳結構化資料給網頁畫表格
+router.get("/api/checkpoint-log/:id", async (req, res, next) => {
+  try {
+    res.json(await teamService.checkpointPassOrder(String(req.params.id).toUpperCase()));
+  } catch (err) {
+    if (err.message && err.message.startsWith("未知的關卡代號")) {
+      return res.status(404).json({ error: "找不到這個關卡代號" });
+    }
+    next(err);
+  }
+});
+
 router.get("/api/referees", async (req, res, next) => {
   try {
     res.json(await teamService.listReferees());

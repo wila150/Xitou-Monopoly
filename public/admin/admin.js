@@ -37,7 +37,7 @@ function switchTab(tab) {
   document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
   btn.classList.add("active");
   document.getElementById(`panel-${tab}`).classList.add("active");
-  if (tab === "progress") { loadProgress(); loadBroadcastScope(); }
+  if (tab === "progress") { loadProgress(); loadBroadcastScope(); fillCheckpointSelect().catch(() => {}); }
   if (tab === "referees") loadReferees();
   if (tab === "line-users") loadLineUsers();
   if (tab === "leaders") loadTeamLeaders();
@@ -616,7 +616,44 @@ async function fillCheckpointSelect() {
   const cps = await api("/api/checkpoints");
   checkpointOptionsHtml = cps.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.id)} ${escapeHtml(c.name)}</option>`).join("");
   document.getElementById("assign-referee-cp").innerHTML = checkpointOptionsHtml;
+  const orderSelect = document.getElementById("cp-order-select");
+  if (orderSelect && !orderSelect.innerHTML) orderSelect.innerHTML = checkpointOptionsHtml;
 }
+
+// ---- 查某一關的通過順序（即時進度分頁）----
+const CP_ORDER_STATUS_LABEL = {
+  NOT_CHECKED_IN: "⏳ 尚未報到",
+  NOT_STARTED: "⏳ 尚未出發",
+  WAITING: "✋ 已抵達，等待確認",
+  EN_ROUTE: "🚶 還在路上",
+};
+const cpOrderMsg = document.getElementById("cp-order-msg");
+async function queryCheckpointOrder() {
+  const cpId = document.getElementById("cp-order-select").value;
+  if (!cpId) return showMsg(cpOrderMsg, "請先選擇關卡。", true);
+  try {
+    const { rows } = await api(`/api/checkpoint-log/${encodeURIComponent(cpId)}`);
+    document.getElementById("cp-order-table").hidden = rows.length === 0;
+    document.getElementById("cp-order-body").innerHTML =
+      rows
+        .map((r, i) => {
+          const passed = r.status === "PASSED";
+          return `<tr${passed && i === 0 ? ' style="font-weight:700;background:#eef7ee;"' : ""}>
+            <td>${passed ? (i === 0 ? "🥇 最快" : i + 1) : "-"}</td>
+            <td>${r.groupNo}組</td>
+            <td>第 ${r.plannedIndex} 關</td>
+            <td>${passed ? "✅ 已通過" : CP_ORDER_STATUS_LABEL[r.status] || r.status}</td>
+            <td>${passed ? new Date(r.passedAt).toLocaleString("zh-TW") : "-"}</td>
+          </tr>`;
+        })
+        .join("") || "";
+    showMsg(cpOrderMsg, rows.length === 0 ? "路線設定裡沒有任何組別會經過這一關。" : "", false);
+  } catch (err) {
+    document.getElementById("cp-order-table").hidden = true;
+    showMsg(cpOrderMsg, err.message, true);
+  }
+}
+document.getElementById("cp-order-query").addEventListener("click", queryCheckpointOrder);
 
 const refereesMsg = document.getElementById("referees-msg");
 async function loadReferees() {

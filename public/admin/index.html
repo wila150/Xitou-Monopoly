@@ -95,6 +95,20 @@
         </thead>
         <tbody id="progress-body"></tbody>
       </table>
+
+      <div class="route-card" style="margin-top:20px;">
+        <strong>🔎 查某一關的通過順序</strong>
+        <p style="font-size:12px;color:#888;margin:6px 0 10px;">例如想知道「哪一組最早通過 B6」，選關卡按查詢即可；等同 LINE 指令「順序 B6」。時間是<strong>小編／關主按下「通過」的時間</strong>，不是隊伍上傳照片／影片的當下（送審資料核准後就不會保留原始時間）。</p>
+        <div class="toolbar" style="align-items:center;">
+          <select id="cp-order-select"></select>
+          <button class="btn secondary" id="cp-order-query">查詢通過順序</button>
+        </div>
+        <div class="msg" id="cp-order-msg"></div>
+        <table id="cp-order-table" hidden>
+          <thead><tr><th>順序</th><th>組別</th><th>第幾關</th><th>狀態</th><th>通過時間</th></tr></thead>
+          <tbody id="cp-order-body"></tbody>
+        </table>
+      </div>
     </section>
 
     <!-- 關主名單 -->
